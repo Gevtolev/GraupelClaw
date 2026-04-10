@@ -14,6 +14,8 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
   const target = state.activeChatTarget;
   if (!target) return null;
 
+  const isAgentSessions = target.type === "agent";
+
   const conversations = state.conversations.filter(
     c => c.targetType === target.type && c.targetId === target.id
   );
@@ -27,11 +29,11 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
       {/* Header */}
       <div className="flex h-12 items-center gap-2 px-3 border-b shrink-0">
         <MessageCircle className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium flex-1">Conversations</span>
+        <span className="text-sm font-medium flex-1">{isAgentSessions ? "Sessions" : "Conversations"}</span>
         <button
           onClick={() => actions.createConversation(target.type, target.id)}
           className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="New conversation"
+          title={isAgentSessions ? "New session" : "New conversation"}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -50,12 +52,14 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
       <div className="flex-1 overflow-y-auto py-1">
         {conversations.length === 0 ? (
           <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-            No conversations yet.<br />Send a message to start.
+            {isAgentSessions ? "No sessions yet." : "No conversations yet."}<br />
+            {isAgentSessions ? "Start a new session to begin." : "Send a message to start."}
           </p>
         ) : (
           conversations.map(conv => {
             const isActive = state.activeConversationId === conv.id;
             const isEditing = editingId === conv.id;
+            const isNativeSession = conv.source === "native-session";
             const time = new Date(conv.updatedAt).toLocaleDateString([], {
               month: "short", day: "numeric",
             });
@@ -106,7 +110,8 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                     <span className="text-[10px] text-muted-foreground shrink-0 group-hover:hidden">
                       {time}
                     </span>
-                    <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                    {!isNativeSession && (
+                      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
                       <button
                         onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title); }}
                         className="p-0.5 rounded hover:bg-muted"
@@ -125,7 +130,8 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
-                    </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

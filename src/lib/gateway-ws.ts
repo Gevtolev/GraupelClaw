@@ -14,6 +14,10 @@ interface WsRpcOptions {
   timeoutMs?: number;
 }
 
+interface PairDeviceOptions extends WsRpcOptions {
+  deviceName: string;
+}
+
 interface WsFrame {
   type: string;
   id?: string;
@@ -153,4 +157,14 @@ export async function gatewayRpcCall(
   } finally {
     conn.close();
   }
+}
+
+/**
+ * Minimal compatibility stub for the existing pairing route.
+ * This keeps the project compiling while pairing is revisited later.
+ */
+export async function pairDevice(
+  _opts: PairDeviceOptions
+): Promise<{ deviceToken: string }> {
+  throw new Error("Device pairing is not implemented in GraupelClaw yet");
 }

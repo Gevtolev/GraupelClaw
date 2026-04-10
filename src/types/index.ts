@@ -51,6 +51,7 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "er
 // ── Chat Target ─────────────────────────────────────────────────────
 
 export type ChatTargetType = "agent" | "team";
+export type ConversationSource = "local" | "native-session";
 
 export interface ChatTarget {
   type: ChatTargetType;
@@ -112,6 +113,8 @@ export interface Conversation {
   title: string;
   createdAt: number;
   updatedAt: number;
+  source?: ConversationSource;
+  sessionKey?: string;
 }
 
 export interface MessageAttachment {

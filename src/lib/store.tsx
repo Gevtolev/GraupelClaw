@@ -30,7 +30,9 @@ import {
   deleteConversation as dbDeleteConversation,
   getMessagesByConversation,
 } from "@/lib/db";
-import { RuntimeClient } from "@/lib/runtime";
+import { parseNativeSessionConversations, parseNativeSessionMessages } from "@/lib/openclaw-sessions";
+import { projectBrand } from "@/lib/project-brand";
+import { gatewayRpc, RuntimeClient } from "@/lib/runtime";
 import type {
   Company,
   Agent,
@@ -52,6 +54,9 @@ import type {
 // ── Session Key Helpers ────────────────────────────────────────────
 
 function dmSessionKey(agentId: string, conversationId: string): string {
+  if (conversationId.startsWith(`agent:${agentId}:`)) {
+    return conversationId;
+  }
   return `agent:${agentId}:${projectBrand.sessionNamespace}:${conversationId}`;
 }
 
@@ -319,6 +324,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return match ? match[1] : null;
   }, []);
 
+  const fetchNativeAgentSessions = useCallback(async (
+    agentId: string,
+    preferredSessionKey?: string
+  ) => {
+    const current = stateRef.current;
+    const company = current.companies.find((c) => c.id === current.activeCompanyId);
+    if (!company?.gatewayUrl || !company?.gatewayToken) {
+      dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+      dispatch({ type: "SET_MESSAGES", messages: [] });
+      return;
+    }
+
+    const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.list", {
+      agentId,
+    });
+
+    const sessions = parseNativeSessionConversations(
+      result.ok ? result.payload : undefined,
+      agentId,
+      current.activeCompanyId || ""
+    );
+
+    dispatch({ type: "SET_CONVERSATIONS", conversations: sessions });
+
+    const nextSessionId =
+      preferredSessionKey && sessions.some((session) => session.id === preferredSessionKey)
+        ? preferredSessionKey
+        : sessions[0]?.id ?? null;
+
+    dispatch({ type: "SET_ACTIVE_CONVERSATION", id: nextSessionId });
+
+    if (!nextSessionId) {
+      dispatch({ type: "SET_MESSAGES", messages: [] });
+      return;
+    }
+
+    const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+      agentId,
+      sessionKey: nextSessionId,
+    });
+
+    dispatch({
+      type: "SET_MESSAGES",
+      messages: parseNativeSessionMessages(
+        history.ok ? history.payload : undefined,
+        agentId,
+        nextSessionId
+      ),
+    });
+  }, []);
+
   // ── Gateway connection ───────────────────────────────────────
 
   const connectGateway = useCallback(() => {
@@ -351,6 +408,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         const current = stateRef.current;
         const streaming = current.streamingStates[agentId];
+        const streamingConversation = streaming
+          ? current.conversations.find((conversation) => conversation.id === streaming.conversationId)
+          : undefined;
+        const shouldPersistLocal = streamingConversation?.source !== "native-session";
         const firstContent = payload.message?.content?.[0];
         const text = (firstContent && firstContent.type === "text") ? firstContent.text : "";
 
@@ -386,7 +447,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (s.activeConversationId === streaming.conversationId) {
                 dispatch({ type: "ADD_MESSAGE", message: msg });
               }
-              addMessage(msg);
+              if (shouldPersistLocal) {
+                addMessage(msg);
+              }
             }
             // Reset streaming content for the next message, but keep streaming active
             dispatch({
@@ -420,12 +483,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 content: `Error: ${errText}`,
                 createdAt: Date.now(),
               };
-              addMessage(msg).then(() => {
+              if (shouldPersistLocal) {
+                addMessage(msg).then(() => {
+                  const s = stateRef.current;
+                  if (s.activeConversationId === streaming.conversationId) {
+                    dispatch({ type: "ADD_MESSAGE", message: msg });
+                  }
+                });
+              } else {
                 const s = stateRef.current;
                 if (s.activeConversationId === streaming.conversationId) {
                   dispatch({ type: "ADD_MESSAGE", message: msg });
                 }
-              });
+              }
             }
             dispatch({ type: "SET_STREAMING", agentId, targetType: streaming?.targetType ?? "agent", targetId: streaming?.targetId ?? "", sessionKey: "", isStreaming: false });
             const errorResolver = pendingStreamResolvers.current.get(agentId);
@@ -448,12 +518,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 content: abortedText,
                 createdAt: Date.now(),
               };
-              addMessage(msg).then(() => {
+              if (shouldPersistLocal) {
+                addMessage(msg).then(() => {
+                  const s = stateRef.current;
+                  if (s.activeConversationId === streaming.conversationId) {
+                    dispatch({ type: "ADD_MESSAGE", message: msg });
+                  }
+                });
+              } else {
                 const s = stateRef.current;
                 if (s.activeConversationId === streaming.conversationId) {
                   dispatch({ type: "ADD_MESSAGE", message: msg });
                 }
-              });
+              }
             }
             dispatch({ type: "SET_STREAMING", agentId, targetType: streaming?.targetType ?? "agent", targetId: streaming?.targetId ?? "", sessionKey: "", isStreaming: false });
             const abortedResolver = pendingStreamResolvers.current.get(agentId);
@@ -703,6 +780,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const selectChatTargetAction = useCallback(async (target: ChatTarget) => {
     dispatch({ type: "SET_CHAT_TARGET", target });
 
+    const current = stateRef.current;
+    const company = current.companies.find((c) => c.id === current.activeCompanyId);
+    if (target.type === "agent" && company?.runtimeType === "openclaw") {
+      await fetchNativeAgentSessions(target.id);
+      return;
+    }
+
     // Load conversations for this target, filtered by active company
     const companyId = stateRef.current.activeCompanyId || undefined;
     const convs = await getConversationsByTarget(target.type, target.id, companyId);
@@ -719,10 +803,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
       dispatch({ type: "SET_MESSAGES", messages: [] });
     }
-  }, []);
+  }, [fetchNativeAgentSessions]);
 
   const selectConversationAction = useCallback(async (id: string) => {
+    const current = stateRef.current;
+    const target = current.activeChatTarget;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+
     dispatch({ type: "SET_ACTIVE_CONVERSATION", id });
+
+    if (target?.type === "agent" && conversation?.source === "native-session") {
+      const company = current.companies.find((c) => c.id === current.activeCompanyId);
+      if (!company?.gatewayUrl || !company?.gatewayToken) {
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+        return;
+      }
+
+      const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+        agentId: target.id,
+        sessionKey: conversation.sessionKey || conversation.id,
+      });
+
+      dispatch({
+        type: "SET_MESSAGES",
+        messages: parseNativeSessionMessages(
+          history.ok ? history.payload : undefined,
+          target.id,
+          conversation.id
+        ),
+      });
+      return;
+    }
+
     const msgs = await getMessagesByConversation(id);
     dispatch({ type: "SET_MESSAGES", messages: msgs });
   }, []);
@@ -730,6 +842,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const createConversationAction = useCallback(async (targetType: ChatTargetType, targetId: string): Promise<string> => {
     const current = stateRef.current;
     const now = Date.now();
+
+    if (targetType === "agent") {
+      const sessionKey = dmSessionKey(targetId, uuidv4());
+      const conv: Conversation = {
+        id: sessionKey,
+        targetType,
+        targetId,
+        companyId: current.activeCompanyId || "",
+        title: "New Session",
+        createdAt: now,
+        updatedAt: now,
+        source: "native-session",
+        sessionKey,
+      };
+      dispatch({ type: "ADD_CONVERSATION", conversation: conv });
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: conv.id });
+      dispatch({ type: "SET_MESSAGES", messages: [] });
+      return conv.id;
+    }
+
     const conv: Conversation = {
       id: uuidv4(),
       targetType,
@@ -747,11 +879,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteConversationAction = useCallback(async (id: string) => {
+    const current = stateRef.current;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+    if (conversation?.source === "native-session") {
+      dispatch({ type: "DELETE_CONVERSATION", id });
+      return;
+    }
     await dbDeleteConversation(id);
     dispatch({ type: "DELETE_CONVERSATION", id });
   }, []);
 
   const renameConversationAction = useCallback(async (id: string, title: string) => {
+    const current = stateRef.current;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+    if (conversation?.source === "native-session") {
+      dispatch({ type: "UPDATE_CONVERSATION", id, updates: { title } });
+      return;
+    }
     await dbUpdateConversation(id, { title });
     dispatch({ type: "UPDATE_CONVERSATION", id, updates: { title } });
   }, []);
@@ -766,26 +910,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     // Ensure we have an active conversation
     let conversationId = current.activeConversationId;
+    let activeConversation = conversationId
+      ? current.conversations.find((conversation) => conversation.id === conversationId)
+      : undefined;
     if (!conversationId) {
-      const now = Date.now();
-      const conv: Conversation = {
-        id: uuidv4(),
-        targetType: target.type,
-        targetId: target.id,
-        companyId: current.activeCompanyId || "",
-        title: content.slice(0, 50),
-        createdAt: now,
-        updatedAt: now,
-      };
-      await dbCreateConversation(conv);
-      dispatch({ type: "ADD_CONVERSATION", conversation: conv });
-      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: conv.id });
-      conversationId = conv.id;
-    } else if (current.messages.length === 0) {
+      conversationId = await createConversationAction(target.type, target.id);
+      activeConversation = stateRef.current.conversations.find(
+        (conversation) => conversation.id === conversationId
+      );
+    }
+
+    if (current.messages.length === 0) {
       // First message in conversation — update title
       const title = content.slice(0, 50);
-      await dbUpdateConversation(conversationId, { title });
-      dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      if (activeConversation?.source === "native-session") {
+        dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      } else {
+        await dbUpdateConversation(conversationId, { title });
+        dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      }
     }
 
     const userMsg: Message = {
@@ -798,11 +941,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attachments: attachments?.length ? attachments : undefined,
       createdAt: Date.now(),
     };
-    await addMessage(userMsg);
+    if (activeConversation?.source !== "native-session") {
+      await addMessage(userMsg);
+    }
     dispatch({ type: "ADD_MESSAGE", message: userMsg });
 
     if (target.type === "agent") {
-      const sessionKey = dmSessionKey(target.id, conversationId);
+      const sessionKey = activeConversation?.sessionKey || dmSessionKey(target.id, conversationId);
       dispatch({
         type: "SET_STREAMING",
         agentId: target.id,
@@ -814,6 +959,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
       try {
         await client.sendMessage(sessionKey, content, undefined, attachments);
+        await fetchNativeAgentSessions(target.id, sessionKey);
       } catch {
         dispatch({ type: "SET_STREAMING", agentId: target.id, targetType: "agent", targetId: target.id, sessionKey, isStreaming: false });
       }
@@ -900,7 +1046,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
-  }, []);
+  }, [createConversationAction, fetchNativeAgentSessions]);
 
   const abortStreamingAction = useCallback(async (agentId: string) => {
     const current = stateRef.current;
