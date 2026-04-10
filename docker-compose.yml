@@ -1,0 +1,12 @@
+services:
+  graupelclaw:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - graupelclaw-data:/data
+    env_file:
+      - .env.docker
+
+volumes:
+  graupelclaw-data:
