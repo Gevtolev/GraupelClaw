@@ -92,6 +92,7 @@ export interface Agent {
   avatar?: string;
   description: string;
   specialty: AgentSpecialty;
+  customName?: boolean; // true = user manually renamed, skip gateway sync for name
   createdAt: number;
 }
 

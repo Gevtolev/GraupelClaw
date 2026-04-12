@@ -165,12 +165,16 @@ export function AgentSettingsDialog({
   }
 
   async function autoSaveAgent(updates: Partial<{ name: string; description: string; avatar: string }>) {
-    const merged = {
+    const merged: Partial<Agent> & { name: string; description: string } = {
       name: (updates.name ?? name).trim(),
       description: (updates.description ?? description).trim(),
       avatar: (updates.avatar ?? avatar) || undefined,
     };
     if (!merged.name) return;
+    // Mark as user-customized name so gateway sync won't overwrite it
+    if (updates.name !== undefined && updates.name.trim() !== agent.name) {
+      merged.customName = true;
+    }
     await actions.updateAgent(agent.id, merged);
   }
 

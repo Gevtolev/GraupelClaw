@@ -672,13 +672,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         if (data.agents && data.agents.length > 0) {
           const existingAgents = (await getAgentsByCompany(id));
-          const existingIds = new Set(existingAgents.map((a) => a.id));
+          const existingMap = new Map(existingAgents.map((a) => [a.id, a]));
           for (const agentData of data.agents) {
-            if (!existingIds.has(agentData.id)) {
+            const existing = existingMap.get(agentData.id);
+            if (existing) {
+              // Update name/avatar if changed (skip name if user customized it)
+              const updates: Partial<Agent> = {};
+              if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+              if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+              if (Object.keys(updates).length > 0) {
+                await dbUpdateAgent(existing.id, updates);
+                dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+              }
+            } else {
               const agent: Agent = {
                 id: agentData.id,
                 companyId: id,
                 name: agentData.name || agentData.id,
+                avatar: agentData.avatar,
                 description: "",
                 specialty: "general",
                 createdAt: Date.now(),
@@ -1180,14 +1191,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!data.agents) return;
 
       const existingAgents = current.agents.filter((a) => a.companyId === company.id);
-      const existingIds = new Set(existingAgents.map((a) => a.id));
+      const existingMap = new Map(existingAgents.map((a) => [a.id, a]));
 
       for (const agentData of data.agents) {
-        if (!existingIds.has(agentData.id)) {
+        const existing = existingMap.get(agentData.id);
+        if (existing) {
+          const updates: Partial<Agent> = {};
+          if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+          if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+          if (Object.keys(updates).length > 0) {
+            await dbUpdateAgent(existing.id, updates);
+            dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+          }
+        } else {
           const agent: Agent = {
             id: agentData.id,
             companyId: company.id,
             name: agentData.name,
+            avatar: agentData.avatar,
             description: `OpenClaw agent: ${agentData.name}`,
             specialty: "general" as AgentSpecialty,
             createdAt: Date.now(),
@@ -1262,6 +1283,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 id: agentConfig.id,
                 companyId,
                 name: agentConfig.name,
+                avatar: agentConfig.avatar,
                 description: `OpenClaw agent: ${agentConfig.name}`,
                 specialty: "general" as AgentSpecialty,
                 createdAt: Date.now(),
@@ -1284,6 +1306,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ]);
         dispatch({ type: "SET_AGENTS", agents });
         dispatch({ type: "SET_TEAMS", teams });
+
+        // Sync agent identity from gateway in background
+        const company = companies[0];
+        if (company?.runtimeType === "openclaw" && company?.gatewayUrl && company?.gatewayToken) {
+          fetch("/api/agents/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gatewayUrl: company.gatewayUrl, gatewayToken: company.gatewayToken }),
+          })
+            .then((r) => r.json())
+            .then(async (data) => {
+              if (!data.agents?.length) return;
+              const existingMap = new Map(agents.map((a) => [a.id, a]));
+              for (const agentData of data.agents) {
+                const existing = existingMap.get(agentData.id);
+                if (existing) {
+                  const updates: Partial<Agent> = {};
+                  if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+                  if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+                  if (Object.keys(updates).length > 0) {
+                    await dbUpdateAgent(existing.id, updates);
+                    dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+                  }
+                } else {
+                  const agent: Agent = {
+                    id: agentData.id,
+                    companyId: firstId,
+                    name: agentData.name || agentData.id,
+                    avatar: agentData.avatar,
+                    description: "",
+                    specialty: "general" as AgentSpecialty,
+                    createdAt: Date.now(),
+                  };
+                  try {
+                    await dbCreateAgent(agent);
+                    dispatch({ type: "ADD_AGENT", agent });
+                  } catch { /* skip */ }
+                }
+              }
+            })
+            .catch(() => { /* sync failed silently */ });
+        }
       }
 
       dispatch({ type: "SET_INITIALIZED" });

@@ -5,11 +5,22 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon, Loader2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export function ConversationPanel({ onClose }: { onClose?: () => void }) {
   const { state, actions } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const target = state.activeChatTarget;
   if (!target) return null;
@@ -135,7 +146,7 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                         </button>
                       )}
                       <button
-                        onClick={e => { e.stopPropagation(); if (!isStreaming) actions.deleteConversation(conv.id); }}
+                        onClick={e => { e.stopPropagation(); if (!isStreaming) setDeletingId(conv.id); }}
                         className={cn(
                           "p-0.5 rounded hover:bg-muted",
                           isStreaming && isActive ? "text-muted-foreground/30 cursor-not-allowed" : "text-destructive"
@@ -153,6 +164,28 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
           })
         )}
       </div>
+
+      <AlertDialog open={!!deletingId} onOpenChange={(open) => { if (!open) setDeletingId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{isAgentSessions ? "Delete Session" : "Delete Conversation"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isAgentSessions
+                ? "This will permanently delete this session and its conversation history from OpenClaw. This action cannot be undone."
+                : "Are you sure you want to delete this conversation? This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deletingId) { actions.deleteConversation(deletingId); setDeletingId(null); } }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
