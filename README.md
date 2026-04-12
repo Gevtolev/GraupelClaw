@@ -1,51 +1,56 @@
 # GraupelClaw
 
-GraupelClaw is a private OpenClaw workspace for agent chat, gateway management, and future session-first tooling.
+GraupelClaw 是一个面向个人的 OpenClaw 操作台，提供 Agent 聊天、网关管理和原生 Session 浏览功能。
 
-This repository started from the ChatClaw codebase and is now being reshaped into an independent long-term project focused on personal OpenClaw workflows.
+基于 ChatClaw 代码库发展而来，已重塑为独立项目，专注于个人 OpenClaw 工作流。
 
-## Current Direction
+## 功能
 
-- Keep the existing chat UI, streaming, gateway config, and workspace editing flows
-- Replace generic "conversation-first" assumptions with stronger OpenClaw session support
-- Grow toward a personal operator console instead of a generic multi-tenant product
+- **Agent 聊天** — 通过 OpenClaw 网关与 Agent 实时对话，支持 SSE 流式输出和工具调用展示
+- **原生 Session 管理** — 浏览、切换、删除 OpenClaw 网关上的原生 Session，查看完整对话历史
+- **Agent Identity 解析** — 自动从网关获取 Agent 的名称、头像、Emoji（支持 IDENTITY.md）
+- **网关配置** — 管理多个 OpenClaw 网关连接，自动检测本地 `~/.openclaw/openclaw.json`
+- **Workspace 文件编辑** — 在线编辑 Agent 的 workspace 文件
 
-## Quick Start
+## 技术栈
+
+- Next.js 16 (App Router) + React 19 + TypeScript
+- Tailwind CSS v4 + shadcn/ui
+- 存储：Dexie/IndexedDB（浏览器端）或 Drizzle/SQLite（服务端）
+- 通信：HTTP/SSE（聊天流）+ WebSocket RPC（网关管理）
+
+## 快速开始
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+打开 [http://localhost:3000](http://localhost:3000)。
 
-If your local OpenClaw setup is available, GraupelClaw will try to detect it from `~/.openclaw/openclaw.json`.
+如果本地有 OpenClaw 网关运行，GraupelClaw 会自动从 `~/.openclaw/openclaw.json` 检测并连接。
 
-## Configuration
+## 配置
 
-Copy [`.env.example`](./.env.example) to `.env` and adjust as needed.
+复制 [`.env.example`](./.env.example) 到 `.env` 并根据需要调整：
 
-Key settings:
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DB_BACKEND` | 存储后端：`indexeddb`（浏览器）或 `drizzle`（SQLite） | `indexeddb` |
+| `PRIVATE_OPENCLAW_CONSOLE_DATA_DIR` | SQLite 数据目录（drizzle 模式） | `./data` |
+| `AUTH_ENABLED` | 是否启用登录认证 | `false` |
+| `MULTI_COMPANY` | 是否支持多网关配置 | `true` |
 
-- `DB_BACKEND=indexeddb` keeps data in the browser
-- `DB_BACKEND=drizzle` stores data in SQLite on the server
-- `PRIVATE_OPENCLAW_CONSOLE_DATA_DIR=./data` controls the SQLite location for this project
-- `AUTH_ENABLED=false` keeps the app local-only unless you want sign-in enabled
-- `MULTI_COMPANY=true` keeps multiple gateway/company configs available
+## 项目结构
 
-## Project Notes
-
-- Branding and storage/session naming are centralized in [`src/lib/project-brand.ts`](./src/lib/project-brand.ts)
-- Current UI conversations are still local app objects, not full OpenClaw-native session browsing yet
-- The next major product step is to surface OpenClaw `sessions_list` and `sessions_history`
-
-## Suggested Next Steps
-
-1. Finish rebranding any remaining UI copy and assets.
-2. Add an agent session list panel backed by OpenClaw RPC.
-3. Add session history playback and session metadata.
-4. Decide whether local `Conversation` remains as a cached layer or becomes a thin wrapper over native sessions.
+- `src/lib/store.tsx` — 全局状态管理（React Context + useReducer）
+- `src/lib/runtime/` — OpenClaw 网关通信客户端
+- `src/lib/gateway-ws.ts` — WebSocket RPC 连接
+- `src/lib/openclaw-sessions.ts` — 原生 Session 解析
+- `src/lib/project-brand.ts` — 品牌和命名配置
+- `src/components/chat-area.tsx` — 聊天主界面
+- `src/components/conversation-panel.tsx` — Session/对话列表面板
 
 ## License
 
-This project remains subject to the upstream MIT license terms included in [`LICENSE`](./LICENSE).
+[MIT](./LICENSE)
