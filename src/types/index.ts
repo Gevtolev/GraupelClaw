@@ -174,6 +174,10 @@ export interface AppState {
     phase: StreamingPhase;
   }>;
 
+  // Native sessions loading
+  nativeSessionsLoading: boolean;
+  nativeSessionsError: string | null;
+
   // UI
   initialized: boolean;
 }

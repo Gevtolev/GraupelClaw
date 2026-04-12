@@ -93,7 +93,9 @@ type Action =
   | { type: "SET_ACTIVE_CONVERSATION"; id: string | null }
   | { type: "SET_STREAMING"; agentId: string; targetType: ChatTargetType; targetId: string; conversationId?: string; sessionKey: string; isStreaming: boolean }
   | { type: "SET_STREAMING_CONTENT"; agentId: string; content: string; runId: string | null; phase?: StreamingPhase; toolCalls?: ToolCallContent[] }
-  | { type: "CLEAR_STREAMING"; agentId: string };
+  | { type: "CLEAR_STREAMING"; agentId: string }
+  | { type: "SET_NATIVE_SESSIONS_LOADING"; loading: boolean }
+  | { type: "SET_NATIVE_SESSIONS_ERROR"; error: string | null };
 
 // ── Initial State ───────────────────────────────────────────────────
 
@@ -109,6 +111,8 @@ const initialState: AppState = {
   connectionStatus: "disconnected",
   agentIdentities: {},
   streamingStates: {},
+  nativeSessionsLoading: false,
+  nativeSessionsError: null,
   initialized: false,
 };
 
@@ -259,6 +263,11 @@ function reducer(state: AppState, action: Action): AppState {
         ),
       };
 
+    case "SET_NATIVE_SESSIONS_LOADING":
+      return { ...state, nativeSessionsLoading: action.loading };
+    case "SET_NATIVE_SESSIONS_ERROR":
+      return { ...state, nativeSessionsError: action.error };
+
     default:
       return state;
   }
@@ -326,54 +335,96 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const fetchNativeAgentSessions = useCallback(async (
     agentId: string,
-    preferredSessionKey?: string
+    preferredSessionKey?: string,
+    opts?: { listOnly?: boolean }
   ) => {
     const current = stateRef.current;
     const company = current.companies.find((c) => c.id === current.activeCompanyId);
     if (!company?.gatewayUrl || !company?.gatewayToken) {
       dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
-      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
-      dispatch({ type: "SET_MESSAGES", messages: [] });
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      }
       return;
     }
 
-    const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.list", {
-      agentId,
-    });
-
-    const sessions = parseNativeSessionConversations(
-      result.ok ? result.payload : undefined,
-      agentId,
-      current.activeCompanyId || ""
-    );
-
-    dispatch({ type: "SET_CONVERSATIONS", conversations: sessions });
-
-    const nextSessionId =
-      preferredSessionKey && sessions.some((session) => session.id === preferredSessionKey)
-        ? preferredSessionKey
-        : sessions[0]?.id ?? null;
-
-    dispatch({ type: "SET_ACTIVE_CONVERSATION", id: nextSessionId });
-
-    if (!nextSessionId) {
-      dispatch({ type: "SET_MESSAGES", messages: [] });
-      return;
+    if (!opts?.listOnly) {
+      dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: true });
     }
+    dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: null });
 
-    const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
-      agentId,
-      sessionKey: nextSessionId,
-    });
-
-    dispatch({
-      type: "SET_MESSAGES",
-      messages: parseNativeSessionMessages(
-        history.ok ? history.payload : undefined,
+    try {
+      const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.list", {
         agentId,
-        nextSessionId
-      ),
-    });
+      });
+
+      if (!result.ok) {
+        dispatch({
+          type: "SET_NATIVE_SESSIONS_ERROR",
+          error: result.error?.message || "Failed to load sessions",
+        });
+        dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+        if (!opts?.listOnly) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+          dispatch({ type: "SET_MESSAGES", messages: [] });
+        }
+        return;
+      }
+
+      const sessions = parseNativeSessionConversations(
+        result.payload,
+        agentId,
+        current.activeCompanyId || ""
+      );
+
+      dispatch({ type: "SET_CONVERSATIONS", conversations: sessions });
+
+      // listOnly: only refresh the session list, keep current conversation and messages
+      if (opts?.listOnly) {
+        if (preferredSessionKey) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", id: preferredSessionKey });
+        }
+        return;
+      }
+
+      const nextSessionId =
+        preferredSessionKey && sessions.some((session) => session.id === preferredSessionKey)
+          ? preferredSessionKey
+          : sessions[0]?.id ?? null;
+
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: nextSessionId });
+
+      if (!nextSessionId) {
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+        return;
+      }
+
+      const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+        sessionKey: nextSessionId,
+      });
+
+      dispatch({
+        type: "SET_MESSAGES",
+        messages: parseNativeSessionMessages(
+          history.ok ? history.payload : undefined,
+          agentId,
+          nextSessionId
+        ),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load sessions";
+      dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: message });
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      }
+    } finally {
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: false });
+      }
+    }
   }, []);
 
   // ── Gateway connection ───────────────────────────────────────
@@ -819,19 +870,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
-        agentId: target.id,
-        sessionKey: conversation.sessionKey || conversation.id,
-      });
+      dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: true });
+      dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: null });
 
-      dispatch({
-        type: "SET_MESSAGES",
-        messages: parseNativeSessionMessages(
-          history.ok ? history.payload : undefined,
-          target.id,
-          conversation.id
-        ),
-      });
+      try {
+        const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+          sessionKey: conversation.sessionKey || conversation.id,
+        });
+
+        if (!history.ok) {
+          dispatch({
+            type: "SET_NATIVE_SESSIONS_ERROR",
+            error: history.error?.message || "Failed to load messages",
+          });
+          dispatch({ type: "SET_MESSAGES", messages: [] });
+          return;
+        }
+
+        dispatch({
+          type: "SET_MESSAGES",
+          messages: parseNativeSessionMessages(
+            history.payload,
+            target.id,
+            conversation.id
+          ),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load messages";
+        dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: message });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      } finally {
+        dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: false });
+      }
       return;
     }
 
@@ -882,6 +952,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const current = stateRef.current;
     const conversation = current.conversations.find((conv) => conv.id === id);
     if (conversation?.source === "native-session") {
+      // Delete from gateway via RPC
+      const company = current.companies[0];
+      if (company?.gatewayUrl && company?.gatewayToken) {
+        const sessionKey = conversation.sessionKey || conversation.id;
+        const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.delete", {
+          key: sessionKey,
+          deleteTranscript: true,
+          emitLifecycleHooks: false,
+        });
+        if (!result.ok) {
+          dispatch({
+            type: "SET_NATIVE_SESSIONS_ERROR",
+            error: result.error?.message || "Failed to delete session",
+          });
+          return;
+        }
+      }
       dispatch({ type: "DELETE_CONVERSATION", id });
       return;
     }
@@ -959,7 +1046,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
       try {
         await client.sendMessage(sessionKey, content, undefined, attachments);
-        await fetchNativeAgentSessions(target.id, sessionKey);
+        await fetchNativeAgentSessions(target.id, sessionKey, { listOnly: true });
       } catch {
         dispatch({ type: "SET_STREAMING", agentId: target.id, targetType: "agent", targetId: target.id, sessionKey, isStreaming: false });
       }

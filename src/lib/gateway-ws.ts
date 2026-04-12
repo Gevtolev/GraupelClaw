@@ -62,7 +62,8 @@ export async function connectGatewayWs(opts: WsRpcOptions): Promise<{
       reject(new Error("Connection timeout"));
     }, timeout);
 
-    const ws = new WebSocket(wsUrl);
+    const wsOrigin = wsUrl.replace("ws://", "http://").replace("wss://", "https://");
+    const ws = new WebSocket(wsUrl, { headers: { origin: wsOrigin } } as unknown as string[]);
     const pending = new Map<string, { resolve: (f: WsFrame) => void; reject: (e: Error) => void }>();
 
     ws.onerror = () => {

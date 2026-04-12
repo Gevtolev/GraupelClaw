@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon } from "lucide-react";
+import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon, Loader2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export function ConversationPanel({ onClose }: { onClose?: () => void }) {
@@ -24,6 +24,8 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
     s => s.isStreaming && s.targetType === target.type && s.targetId === target.id
   );
 
+  const { nativeSessionsLoading, nativeSessionsError } = state;
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -32,8 +34,9 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
         <span className="text-sm font-medium flex-1">{isAgentSessions ? "Sessions" : "Conversations"}</span>
         <button
           onClick={() => actions.createConversation(target.type, target.id)}
-          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
           title={isAgentSessions ? "New session" : "New conversation"}
+          disabled={isAgentSessions && nativeSessionsLoading}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -50,7 +53,18 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
 
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto py-1">
-        {conversations.length === 0 ? (
+        {isAgentSessions && nativeSessionsError && (
+          <div className="flex items-start gap-1.5 mx-2 mb-1 px-2 py-2 rounded-md bg-destructive/10">
+            <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-destructive">{nativeSessionsError}</p>
+          </div>
+        )}
+        {isAgentSessions && nativeSessionsLoading && conversations.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-6">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Loading sessions...</span>
+          </div>
+        ) : conversations.length === 0 ? (
           <p className="px-3 py-4 text-xs text-muted-foreground text-center">
             {isAgentSessions ? "No sessions yet." : "No conversations yet."}<br />
             {isAgentSessions ? "Start a new session to begin." : "Send a message to start."}
@@ -110,15 +124,16 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                     <span className="text-[10px] text-muted-foreground shrink-0 group-hover:hidden">
                       {time}
                     </span>
-                    {!isNativeSession && (
-                      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title); }}
-                        className="p-0.5 rounded hover:bg-muted"
-                        title="Rename"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
+                    <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                      {!isNativeSession && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title); }}
+                          className="p-0.5 rounded hover:bg-muted"
+                          title="Rename"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
                       <button
                         onClick={e => { e.stopPropagation(); if (!isStreaming) actions.deleteConversation(conv.id); }}
                         className={cn(
@@ -130,8 +145,7 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
-                      </div>
-                    )}
+                    </div>
                   </>
                 )}
               </div>
