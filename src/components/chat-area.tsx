@@ -16,7 +16,7 @@ import {
   Paperclip,
   X,
   File as FileIcon,
-  MoreVertical,
+  Clock,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { projectBrand } from "@/lib/project-brand";
@@ -181,6 +181,13 @@ export function ChatArea() {
   const target = state.activeChatTarget;
   const isConnected = state.connectionStatus === "connected";
   const userProfile = loadUserProfile();
+
+  // Auto-open sessions panel when an Agent is selected
+  useEffect(() => {
+    if (target?.type === "agent") {
+      setShowConvPanel(true);
+    }
+  }, [target?.type, target?.id]);
 
   // Get chat target info
   const targetAgent = target?.type === "agent"
@@ -421,15 +428,22 @@ export function ChatArea() {
         <button
           onClick={() => setShowConvPanel(!showConvPanel)}
           className="ml-auto p-1.5 rounded-md hover:bg-muted text-muted-foreground"
-          title="Conversations"
+          title="Session history"
         >
-          <MoreVertical className="h-4 w-4" />
+          <Clock className="h-4 w-4" />
         </button>
       </div>
 
       {/* Messages */}
       <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 px-4 py-4 space-y-4 relative">
-        {state.messages.length === 0 && streamingEntries.length === 0 && (
+        {state.messages.length === 0 && streamingEntries.length === 0 && state.nativeSessionsLoading && (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin mb-3" />
+            <p className="text-sm">Loading messages...</p>
+          </div>
+        )}
+
+        {state.messages.length === 0 && streamingEntries.length === 0 && !state.nativeSessionsLoading && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             {target.type === "agent" ? (
               isEmojiAvatar(targetAgent?.avatar) ? (

@@ -51,6 +51,7 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "er
 // ── Chat Target ─────────────────────────────────────────────────────
 
 export type ChatTargetType = "agent" | "team";
+export type ConversationSource = "local" | "native-session";
 
 export interface ChatTarget {
   type: ChatTargetType;
@@ -91,6 +92,7 @@ export interface Agent {
   avatar?: string;
   description: string;
   specialty: AgentSpecialty;
+  customName?: boolean; // true = user manually renamed, skip gateway sync for name
   createdAt: number;
 }
 
@@ -112,6 +114,8 @@ export interface Conversation {
   title: string;
   createdAt: number;
   updatedAt: number;
+  source?: ConversationSource;
+  sessionKey?: string;
 }
 
 export interface MessageAttachment {
@@ -170,6 +174,10 @@ export interface AppState {
     sessionKey: string;
     phase: StreamingPhase;
   }>;
+
+  // Native sessions loading
+  nativeSessionsLoading: boolean;
+  nativeSessionsError: string | null;
 
   // UI
   initialized: boolean;

@@ -14,6 +14,10 @@ interface WsRpcOptions {
   timeoutMs?: number;
 }
 
+interface PairDeviceOptions extends WsRpcOptions {
+  deviceName: string;
+}
+
 interface WsFrame {
   type: string;
   id?: string;
@@ -58,7 +62,8 @@ export async function connectGatewayWs(opts: WsRpcOptions): Promise<{
       reject(new Error("Connection timeout"));
     }, timeout);
 
-    const ws = new WebSocket(wsUrl);
+    const wsOrigin = wsUrl.replace("ws://", "http://").replace("wss://", "https://");
+    const ws = new WebSocket(wsUrl, { headers: { origin: wsOrigin } } as unknown as string[]);
     const pending = new Map<string, { resolve: (f: WsFrame) => void; reject: (e: Error) => void }>();
 
     ws.onerror = () => {
@@ -153,4 +158,14 @@ export async function gatewayRpcCall(
   } finally {
     conn.close();
   }
+}
+
+/**
+ * Minimal compatibility stub for the existing pairing route.
+ * This keeps the project compiling while pairing is revisited later.
+ */
+export async function pairDevice(
+  _opts: PairDeviceOptions
+): Promise<{ deviceToken: string }> {
+  throw new Error("Device pairing is not implemented in GraupelClaw yet");
 }

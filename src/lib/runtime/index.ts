@@ -72,7 +72,7 @@ export class RuntimeClient implements RuntimeProvider {
       if (this.config.type === "openclaw") {
         headers["x-openclaw-agent-id"] = resolvedAgentId;
         headers["x-openclaw-session-key"] = sessionKey;
-        model = `openclaw:${resolvedAgentId}`;
+        model = `openclaw/${resolvedAgentId}`;
       }
 
       if (this.config.headers) {

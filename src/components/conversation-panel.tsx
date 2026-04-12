@@ -3,16 +3,29 @@
 import React, { useState } from "react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon } from "lucide-react";
+import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon, Loader2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export function ConversationPanel({ onClose }: { onClose?: () => void }) {
   const { state, actions } = useStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const target = state.activeChatTarget;
   if (!target) return null;
+
+  const isAgentSessions = target.type === "agent";
 
   const conversations = state.conversations.filter(
     c => c.targetType === target.type && c.targetId === target.id
@@ -22,16 +35,19 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
     s => s.isStreaming && s.targetType === target.type && s.targetId === target.id
   );
 
+  const { nativeSessionsLoading, nativeSessionsError } = state;
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex h-12 items-center gap-2 px-3 border-b shrink-0">
         <MessageCircle className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium flex-1">Conversations</span>
+        <span className="text-sm font-medium flex-1">{isAgentSessions ? "Sessions" : "Conversations"}</span>
         <button
           onClick={() => actions.createConversation(target.type, target.id)}
-          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="New conversation"
+          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+          title={isAgentSessions ? "New session" : "New conversation"}
+          disabled={isAgentSessions && nativeSessionsLoading}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -48,14 +64,27 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
 
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto py-1">
-        {conversations.length === 0 ? (
+        {isAgentSessions && nativeSessionsError && (
+          <div className="flex items-start gap-1.5 mx-2 mb-1 px-2 py-2 rounded-md bg-destructive/10">
+            <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-destructive">{nativeSessionsError}</p>
+          </div>
+        )}
+        {isAgentSessions && nativeSessionsLoading && conversations.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-6">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Loading sessions...</span>
+          </div>
+        ) : conversations.length === 0 ? (
           <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-            No conversations yet.<br />Send a message to start.
+            {isAgentSessions ? "No sessions yet." : "No conversations yet."}<br />
+            {isAgentSessions ? "Start a new session to begin." : "Send a message to start."}
           </p>
         ) : (
           conversations.map(conv => {
             const isActive = state.activeConversationId === conv.id;
             const isEditing = editingId === conv.id;
+            const isNativeSession = conv.source === "native-session";
             const time = new Date(conv.updatedAt).toLocaleDateString([], {
               month: "short", day: "numeric",
             });
@@ -107,15 +136,17 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                       {time}
                     </span>
                     <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                      {!isNativeSession && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title); }}
+                          className="p-0.5 rounded hover:bg-muted"
+                          title="Rename"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
                       <button
-                        onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title); }}
-                        className="p-0.5 rounded hover:bg-muted"
-                        title="Rename"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); if (!isStreaming) actions.deleteConversation(conv.id); }}
+                        onClick={e => { e.stopPropagation(); if (!isStreaming) setDeletingId(conv.id); }}
                         className={cn(
                           "p-0.5 rounded hover:bg-muted",
                           isStreaming && isActive ? "text-muted-foreground/30 cursor-not-allowed" : "text-destructive"
@@ -133,6 +164,28 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
           })
         )}
       </div>
+
+      <AlertDialog open={!!deletingId} onOpenChange={(open) => { if (!open) setDeletingId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{isAgentSessions ? "Delete Session" : "Delete Conversation"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isAgentSessions
+                ? "This will permanently delete this session and its conversation history from OpenClaw. This action cannot be undone."
+                : "Are you sure you want to delete this conversation? This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deletingId) { actions.deleteConversation(deletingId); setDeletingId(null); } }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

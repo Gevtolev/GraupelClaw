@@ -30,7 +30,9 @@ import {
   deleteConversation as dbDeleteConversation,
   getMessagesByConversation,
 } from "@/lib/db";
-import { RuntimeClient } from "@/lib/runtime";
+import { parseNativeSessionConversations, parseNativeSessionMessages } from "@/lib/openclaw-sessions";
+import { projectBrand } from "@/lib/project-brand";
+import { gatewayRpc, RuntimeClient } from "@/lib/runtime";
 import type {
   Company,
   Agent,
@@ -52,6 +54,9 @@ import type {
 // ── Session Key Helpers ────────────────────────────────────────────
 
 function dmSessionKey(agentId: string, conversationId: string): string {
+  if (conversationId.startsWith(`agent:${agentId}:`)) {
+    return conversationId;
+  }
   return `agent:${agentId}:${projectBrand.sessionNamespace}:${conversationId}`;
 }
 
@@ -88,7 +93,9 @@ type Action =
   | { type: "SET_ACTIVE_CONVERSATION"; id: string | null }
   | { type: "SET_STREAMING"; agentId: string; targetType: ChatTargetType; targetId: string; conversationId?: string; sessionKey: string; isStreaming: boolean }
   | { type: "SET_STREAMING_CONTENT"; agentId: string; content: string; runId: string | null; phase?: StreamingPhase; toolCalls?: ToolCallContent[] }
-  | { type: "CLEAR_STREAMING"; agentId: string };
+  | { type: "CLEAR_STREAMING"; agentId: string }
+  | { type: "SET_NATIVE_SESSIONS_LOADING"; loading: boolean }
+  | { type: "SET_NATIVE_SESSIONS_ERROR"; error: string | null };
 
 // ── Initial State ───────────────────────────────────────────────────
 
@@ -104,6 +111,8 @@ const initialState: AppState = {
   connectionStatus: "disconnected",
   agentIdentities: {},
   streamingStates: {},
+  nativeSessionsLoading: false,
+  nativeSessionsError: null,
   initialized: false,
 };
 
@@ -254,6 +263,11 @@ function reducer(state: AppState, action: Action): AppState {
         ),
       };
 
+    case "SET_NATIVE_SESSIONS_LOADING":
+      return { ...state, nativeSessionsLoading: action.loading };
+    case "SET_NATIVE_SESSIONS_ERROR":
+      return { ...state, nativeSessionsError: action.error };
+
     default:
       return state;
   }
@@ -319,6 +333,100 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return match ? match[1] : null;
   }, []);
 
+  const fetchNativeAgentSessions = useCallback(async (
+    agentId: string,
+    preferredSessionKey?: string,
+    opts?: { listOnly?: boolean }
+  ) => {
+    const current = stateRef.current;
+    const company = current.companies.find((c) => c.id === current.activeCompanyId);
+    if (!company?.gatewayUrl || !company?.gatewayToken) {
+      dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      }
+      return;
+    }
+
+    if (!opts?.listOnly) {
+      dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: true });
+    }
+    dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: null });
+
+    try {
+      const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.list", {
+        agentId,
+      });
+
+      if (!result.ok) {
+        dispatch({
+          type: "SET_NATIVE_SESSIONS_ERROR",
+          error: result.error?.message || "Failed to load sessions",
+        });
+        dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+        if (!opts?.listOnly) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+          dispatch({ type: "SET_MESSAGES", messages: [] });
+        }
+        return;
+      }
+
+      const sessions = parseNativeSessionConversations(
+        result.payload,
+        agentId,
+        current.activeCompanyId || ""
+      );
+
+      dispatch({ type: "SET_CONVERSATIONS", conversations: sessions });
+
+      // listOnly: only refresh the session list, keep current conversation and messages
+      if (opts?.listOnly) {
+        if (preferredSessionKey) {
+          dispatch({ type: "SET_ACTIVE_CONVERSATION", id: preferredSessionKey });
+        }
+        return;
+      }
+
+      const nextSessionId =
+        preferredSessionKey && sessions.some((session) => session.id === preferredSessionKey)
+          ? preferredSessionKey
+          : sessions[0]?.id ?? null;
+
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: nextSessionId });
+
+      if (!nextSessionId) {
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+        return;
+      }
+
+      const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+        sessionKey: nextSessionId,
+      });
+
+      dispatch({
+        type: "SET_MESSAGES",
+        messages: parseNativeSessionMessages(
+          history.ok ? history.payload : undefined,
+          agentId,
+          nextSessionId
+        ),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load sessions";
+      dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: message });
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_CONVERSATIONS", conversations: [] });
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      }
+    } finally {
+      if (!opts?.listOnly) {
+        dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: false });
+      }
+    }
+  }, []);
+
   // ── Gateway connection ───────────────────────────────────────
 
   const connectGateway = useCallback(() => {
@@ -351,6 +459,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         const current = stateRef.current;
         const streaming = current.streamingStates[agentId];
+        const streamingConversation = streaming
+          ? current.conversations.find((conversation) => conversation.id === streaming.conversationId)
+          : undefined;
+        const shouldPersistLocal = streamingConversation?.source !== "native-session";
         const firstContent = payload.message?.content?.[0];
         const text = (firstContent && firstContent.type === "text") ? firstContent.text : "";
 
@@ -386,7 +498,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (s.activeConversationId === streaming.conversationId) {
                 dispatch({ type: "ADD_MESSAGE", message: msg });
               }
-              addMessage(msg);
+              if (shouldPersistLocal) {
+                addMessage(msg);
+              }
             }
             // Reset streaming content for the next message, but keep streaming active
             dispatch({
@@ -420,12 +534,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 content: `Error: ${errText}`,
                 createdAt: Date.now(),
               };
-              addMessage(msg).then(() => {
+              if (shouldPersistLocal) {
+                addMessage(msg).then(() => {
+                  const s = stateRef.current;
+                  if (s.activeConversationId === streaming.conversationId) {
+                    dispatch({ type: "ADD_MESSAGE", message: msg });
+                  }
+                });
+              } else {
                 const s = stateRef.current;
                 if (s.activeConversationId === streaming.conversationId) {
                   dispatch({ type: "ADD_MESSAGE", message: msg });
                 }
-              });
+              }
             }
             dispatch({ type: "SET_STREAMING", agentId, targetType: streaming?.targetType ?? "agent", targetId: streaming?.targetId ?? "", sessionKey: "", isStreaming: false });
             const errorResolver = pendingStreamResolvers.current.get(agentId);
@@ -448,12 +569,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 content: abortedText,
                 createdAt: Date.now(),
               };
-              addMessage(msg).then(() => {
+              if (shouldPersistLocal) {
+                addMessage(msg).then(() => {
+                  const s = stateRef.current;
+                  if (s.activeConversationId === streaming.conversationId) {
+                    dispatch({ type: "ADD_MESSAGE", message: msg });
+                  }
+                });
+              } else {
                 const s = stateRef.current;
                 if (s.activeConversationId === streaming.conversationId) {
                   dispatch({ type: "ADD_MESSAGE", message: msg });
                 }
-              });
+              }
             }
             dispatch({ type: "SET_STREAMING", agentId, targetType: streaming?.targetType ?? "agent", targetId: streaming?.targetId ?? "", sessionKey: "", isStreaming: false });
             const abortedResolver = pendingStreamResolvers.current.get(agentId);
@@ -544,13 +672,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         if (data.agents && data.agents.length > 0) {
           const existingAgents = (await getAgentsByCompany(id));
-          const existingIds = new Set(existingAgents.map((a) => a.id));
+          const existingMap = new Map(existingAgents.map((a) => [a.id, a]));
           for (const agentData of data.agents) {
-            if (!existingIds.has(agentData.id)) {
+            const existing = existingMap.get(agentData.id);
+            if (existing) {
+              // Update name/avatar if changed (skip name if user customized it)
+              const updates: Partial<Agent> = {};
+              if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+              if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+              if (Object.keys(updates).length > 0) {
+                await dbUpdateAgent(existing.id, updates);
+                dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+              }
+            } else {
               const agent: Agent = {
                 id: agentData.id,
                 companyId: id,
                 name: agentData.name || agentData.id,
+                avatar: agentData.avatar,
                 description: "",
                 specialty: "general",
                 createdAt: Date.now(),
@@ -703,6 +842,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const selectChatTargetAction = useCallback(async (target: ChatTarget) => {
     dispatch({ type: "SET_CHAT_TARGET", target });
 
+    const current = stateRef.current;
+    const company = current.companies.find((c) => c.id === current.activeCompanyId);
+    if (target.type === "agent" && company?.runtimeType === "openclaw") {
+      await fetchNativeAgentSessions(target.id);
+      return;
+    }
+
     // Load conversations for this target, filtered by active company
     const companyId = stateRef.current.activeCompanyId || undefined;
     const convs = await getConversationsByTarget(target.type, target.id, companyId);
@@ -719,10 +865,57 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "SET_ACTIVE_CONVERSATION", id: null });
       dispatch({ type: "SET_MESSAGES", messages: [] });
     }
-  }, []);
+  }, [fetchNativeAgentSessions]);
 
   const selectConversationAction = useCallback(async (id: string) => {
+    const current = stateRef.current;
+    const target = current.activeChatTarget;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+
     dispatch({ type: "SET_ACTIVE_CONVERSATION", id });
+
+    if (target?.type === "agent" && conversation?.source === "native-session") {
+      const company = current.companies.find((c) => c.id === current.activeCompanyId);
+      if (!company?.gatewayUrl || !company?.gatewayToken) {
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+        return;
+      }
+
+      dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: true });
+      dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: null });
+
+      try {
+        const history = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "chat.history", {
+          sessionKey: conversation.sessionKey || conversation.id,
+        });
+
+        if (!history.ok) {
+          dispatch({
+            type: "SET_NATIVE_SESSIONS_ERROR",
+            error: history.error?.message || "Failed to load messages",
+          });
+          dispatch({ type: "SET_MESSAGES", messages: [] });
+          return;
+        }
+
+        dispatch({
+          type: "SET_MESSAGES",
+          messages: parseNativeSessionMessages(
+            history.payload,
+            target.id,
+            conversation.id
+          ),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load messages";
+        dispatch({ type: "SET_NATIVE_SESSIONS_ERROR", error: message });
+        dispatch({ type: "SET_MESSAGES", messages: [] });
+      } finally {
+        dispatch({ type: "SET_NATIVE_SESSIONS_LOADING", loading: false });
+      }
+      return;
+    }
+
     const msgs = await getMessagesByConversation(id);
     dispatch({ type: "SET_MESSAGES", messages: msgs });
   }, []);
@@ -730,6 +923,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const createConversationAction = useCallback(async (targetType: ChatTargetType, targetId: string): Promise<string> => {
     const current = stateRef.current;
     const now = Date.now();
+
+    if (targetType === "agent") {
+      const sessionKey = dmSessionKey(targetId, uuidv4());
+      const conv: Conversation = {
+        id: sessionKey,
+        targetType,
+        targetId,
+        companyId: current.activeCompanyId || "",
+        title: "New Session",
+        createdAt: now,
+        updatedAt: now,
+        source: "native-session",
+        sessionKey,
+      };
+      dispatch({ type: "ADD_CONVERSATION", conversation: conv });
+      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: conv.id });
+      dispatch({ type: "SET_MESSAGES", messages: [] });
+      return conv.id;
+    }
+
     const conv: Conversation = {
       id: uuidv4(),
       targetType,
@@ -747,11 +960,40 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteConversationAction = useCallback(async (id: string) => {
+    const current = stateRef.current;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+    if (conversation?.source === "native-session") {
+      // Delete from gateway via RPC
+      const company = current.companies[0];
+      if (company?.gatewayUrl && company?.gatewayToken) {
+        const sessionKey = conversation.sessionKey || conversation.id;
+        const result = await gatewayRpc(company.gatewayUrl, company.gatewayToken, "sessions.delete", {
+          key: sessionKey,
+          deleteTranscript: true,
+          emitLifecycleHooks: false,
+        });
+        if (!result.ok) {
+          dispatch({
+            type: "SET_NATIVE_SESSIONS_ERROR",
+            error: result.error?.message || "Failed to delete session",
+          });
+          return;
+        }
+      }
+      dispatch({ type: "DELETE_CONVERSATION", id });
+      return;
+    }
     await dbDeleteConversation(id);
     dispatch({ type: "DELETE_CONVERSATION", id });
   }, []);
 
   const renameConversationAction = useCallback(async (id: string, title: string) => {
+    const current = stateRef.current;
+    const conversation = current.conversations.find((conv) => conv.id === id);
+    if (conversation?.source === "native-session") {
+      dispatch({ type: "UPDATE_CONVERSATION", id, updates: { title } });
+      return;
+    }
     await dbUpdateConversation(id, { title });
     dispatch({ type: "UPDATE_CONVERSATION", id, updates: { title } });
   }, []);
@@ -766,26 +1008,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     // Ensure we have an active conversation
     let conversationId = current.activeConversationId;
+    let activeConversation = conversationId
+      ? current.conversations.find((conversation) => conversation.id === conversationId)
+      : undefined;
     if (!conversationId) {
-      const now = Date.now();
-      const conv: Conversation = {
-        id: uuidv4(),
-        targetType: target.type,
-        targetId: target.id,
-        companyId: current.activeCompanyId || "",
-        title: content.slice(0, 50),
-        createdAt: now,
-        updatedAt: now,
-      };
-      await dbCreateConversation(conv);
-      dispatch({ type: "ADD_CONVERSATION", conversation: conv });
-      dispatch({ type: "SET_ACTIVE_CONVERSATION", id: conv.id });
-      conversationId = conv.id;
-    } else if (current.messages.length === 0) {
+      conversationId = await createConversationAction(target.type, target.id);
+      activeConversation = stateRef.current.conversations.find(
+        (conversation) => conversation.id === conversationId
+      );
+    }
+
+    if (current.messages.length === 0) {
       // First message in conversation — update title
       const title = content.slice(0, 50);
-      await dbUpdateConversation(conversationId, { title });
-      dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      if (activeConversation?.source === "native-session") {
+        dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      } else {
+        await dbUpdateConversation(conversationId, { title });
+        dispatch({ type: "UPDATE_CONVERSATION", id: conversationId, updates: { title } });
+      }
     }
 
     const userMsg: Message = {
@@ -798,11 +1039,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attachments: attachments?.length ? attachments : undefined,
       createdAt: Date.now(),
     };
-    await addMessage(userMsg);
+    if (activeConversation?.source !== "native-session") {
+      await addMessage(userMsg);
+    }
     dispatch({ type: "ADD_MESSAGE", message: userMsg });
 
     if (target.type === "agent") {
-      const sessionKey = dmSessionKey(target.id, conversationId);
+      const sessionKey = activeConversation?.sessionKey || dmSessionKey(target.id, conversationId);
       dispatch({
         type: "SET_STREAMING",
         agentId: target.id,
@@ -814,6 +1057,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
       try {
         await client.sendMessage(sessionKey, content, undefined, attachments);
+        await fetchNativeAgentSessions(target.id, sessionKey, { listOnly: true });
       } catch {
         dispatch({ type: "SET_STREAMING", agentId: target.id, targetType: "agent", targetId: target.id, sessionKey, isStreaming: false });
       }
@@ -900,7 +1144,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
-  }, []);
+  }, [createConversationAction, fetchNativeAgentSessions]);
 
   const abortStreamingAction = useCallback(async (agentId: string) => {
     const current = stateRef.current;
@@ -947,14 +1191,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!data.agents) return;
 
       const existingAgents = current.agents.filter((a) => a.companyId === company.id);
-      const existingIds = new Set(existingAgents.map((a) => a.id));
+      const existingMap = new Map(existingAgents.map((a) => [a.id, a]));
 
       for (const agentData of data.agents) {
-        if (!existingIds.has(agentData.id)) {
+        const existing = existingMap.get(agentData.id);
+        if (existing) {
+          const updates: Partial<Agent> = {};
+          if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+          if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+          if (Object.keys(updates).length > 0) {
+            await dbUpdateAgent(existing.id, updates);
+            dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+          }
+        } else {
           const agent: Agent = {
             id: agentData.id,
             companyId: company.id,
             name: agentData.name,
+            avatar: agentData.avatar,
             description: `OpenClaw agent: ${agentData.name}`,
             specialty: "general" as AgentSpecialty,
             createdAt: Date.now(),
@@ -1029,6 +1283,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 id: agentConfig.id,
                 companyId,
                 name: agentConfig.name,
+                avatar: agentConfig.avatar,
                 description: `OpenClaw agent: ${agentConfig.name}`,
                 specialty: "general" as AgentSpecialty,
                 createdAt: Date.now(),
@@ -1051,6 +1306,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ]);
         dispatch({ type: "SET_AGENTS", agents });
         dispatch({ type: "SET_TEAMS", teams });
+
+        // Sync agent identity from gateway in background
+        const company = companies[0];
+        if (company?.runtimeType === "openclaw" && company?.gatewayUrl && company?.gatewayToken) {
+          fetch("/api/agents/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gatewayUrl: company.gatewayUrl, gatewayToken: company.gatewayToken }),
+          })
+            .then((r) => r.json())
+            .then(async (data) => {
+              if (!data.agents?.length) return;
+              const existingMap = new Map(agents.map((a) => [a.id, a]));
+              for (const agentData of data.agents) {
+                const existing = existingMap.get(agentData.id);
+                if (existing) {
+                  const updates: Partial<Agent> = {};
+                  if (!existing.customName && agentData.name && agentData.name !== existing.name) updates.name = agentData.name;
+                  if (agentData.avatar !== undefined && agentData.avatar !== existing.avatar) updates.avatar = agentData.avatar;
+                  if (Object.keys(updates).length > 0) {
+                    await dbUpdateAgent(existing.id, updates);
+                    dispatch({ type: "UPDATE_AGENT", id: existing.id, updates });
+                  }
+                } else {
+                  const agent: Agent = {
+                    id: agentData.id,
+                    companyId: firstId,
+                    name: agentData.name || agentData.id,
+                    avatar: agentData.avatar,
+                    description: "",
+                    specialty: "general" as AgentSpecialty,
+                    createdAt: Date.now(),
+                  };
+                  try {
+                    await dbCreateAgent(agent);
+                    dispatch({ type: "ADD_AGENT", agent });
+                  } catch { /* skip */ }
+                }
+              }
+            })
+            .catch(() => { /* sync failed silently */ });
+        }
       }
 
       dispatch({ type: "SET_INITIALIZED" });
