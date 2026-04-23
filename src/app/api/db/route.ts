@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
           avatar: params.avatar || null,
           description: params.description || null,
           agentIds: JSON.stringify(params.agentIds || []),
+          tlAgentId: params.tlAgentId || null,
           createdAt: params.createdAt,
         }).run();
         return NextResponse.json({ ok: true });

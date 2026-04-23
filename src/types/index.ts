@@ -103,6 +103,7 @@ export interface AgentTeam {
   avatar?: string;
   description?: string;
   agentIds: string[];
+  tlAgentId?: string;
   createdAt: number;
 }
 
@@ -178,6 +179,13 @@ export interface AppState {
   // Native sessions loading
   nativeSessionsLoading: boolean;
   nativeSessionsError: string | null;
+
+  // Cascade status (set by dispatcher, cleared on new send)
+  lastCascadeStatus: {
+    conversationId: string;
+    reason: "max_hops" | "loop" | "abort";
+    hop: number;
+  } | null;
 
   // UI
   initialized: boolean;

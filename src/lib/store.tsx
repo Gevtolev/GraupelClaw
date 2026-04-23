@@ -113,6 +113,7 @@ const initialState: AppState = {
   streamingStates: {},
   nativeSessionsLoading: false,
   nativeSessionsError: null,
+  lastCascadeStatus: null,
   initialized: false,
 };
 
