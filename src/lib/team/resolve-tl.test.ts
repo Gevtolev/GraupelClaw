@@ -27,6 +27,6 @@ describe("resolveTlAgentId", () => {
   });
 
   it("returns undefined when agentIds is empty and no tlAgentId", () => {
-    expect(resolveTlAgentId(makeTeam({ agentIds: [], tlAgentId: undefined }))).toBe(undefined as unknown as string);
+    expect(resolveTlAgentId(makeTeam({ agentIds: [], tlAgentId: undefined }))).toBeUndefined();
   });
 });
