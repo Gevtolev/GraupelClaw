@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/lib/store-legacy";
+import { useAgentStore, useActions } from "@/lib/store";
 import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import {
@@ -43,7 +43,8 @@ export function TeamSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const agentStore = useAgentStore();
+  const actions = useActions();
   const [name, setName] = useState(team.name);
   const [avatar, setAvatar] = useState(team.avatar || "");
   const [description, setDescription] = useState(team.description || "");
@@ -54,7 +55,7 @@ export function TeamSettingsDialog({
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const companyAgents = state.agents.filter((a) => a.companyId === team.companyId);
+  const companyAgents = agentStore.state.agents.filter((a) => a.companyId === team.companyId);
   const effectiveTeam: AgentTeam = {
     ...team,
     agentIds: selectedAgentIds,
@@ -79,7 +80,7 @@ export function TeamSettingsDialog({
       agentIds: updates.agentIds ?? selectedAgentIds,
     };
     if (!merged.name || merged.agentIds.length === 0) return;
-    await actions.updateTeam(team.id, merged);
+    await agentStore.updateTeam(team.id, merged);
   }
 
   function toggleAgent(id: string) {
@@ -96,7 +97,7 @@ export function TeamSettingsDialog({
         setLocalTlAgentId(undefined);
       }
       if (merged.name && next.length > 0) {
-        actions.updateTeam(team.id, merged);
+        agentStore.updateTeam(team.id, merged);
       }
       return next;
     });
@@ -287,7 +288,7 @@ export function TeamSettingsDialog({
                               onClick={() => {
                                 if (agent.id !== currentTlId) {
                                   setLocalTlAgentId(agent.id);
-                                  actions.updateTeam(team.id, { tlAgentId: agent.id });
+                                  agentStore.updateTeam(team.id, { tlAgentId: agent.id });
                                 }
                               }}
                               title={isTl ? "Current Team Leader" : "Set as Team Leader"}

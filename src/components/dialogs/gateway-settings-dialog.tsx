@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/lib/store-legacy";
+import { useGatewayStore, useActions } from "@/lib/store";
 import { useAppConfig } from "@/hooks/use-app-config";
 import { testConnection, gatewayRpc } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
@@ -59,9 +59,10 @@ export function GatewaySettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const gatewayStore = useGatewayStore();
+  const actions = useActions();
   const { multiCompany } = useAppConfig();
-  const company = state.companies.find((c) => c.id === state.activeCompanyId);
+  const company = gatewayStore.state.companies.find((c) => c.id === gatewayStore.state.activeCompanyId);
 
   const [name, setName] = useState("");
   const [logo, setLogo] = useState("");
@@ -136,7 +137,7 @@ export function GatewaySettingsDialog({
 
   if (!company) return null;
 
-  const isConnected = state.connectionStatus === "connected";
+  const isConnected = gatewayStore.state.connectionStatus === "connected";
 
   async function handleTest() {
     if (!gatewayUrl || !gatewayToken) return;
@@ -181,7 +182,7 @@ export function GatewaySettingsDialog({
     };
     const merged = { ...current, ...updates };
     if (!merged.name) return;
-    await actions.updateCompany(company.id, merged);
+    await gatewayStore.updateCompany(company.id, merged);
   }
 
   function handleGeneralBlur() {
@@ -197,7 +198,7 @@ export function GatewaySettingsDialog({
     // Check for duplicate gateway URL
     if (gatewayUrl.trim() && company) {
       const normalized = normalizeGatewayUrl(gatewayUrl);
-      const existing = state.companies.find(
+      const existing = gatewayStore.state.companies.find(
         (c) => c.id !== company.id && c.gatewayUrl && normalizeGatewayUrl(c.gatewayUrl) === normalized
       );
       if (existing) {
@@ -385,9 +386,9 @@ export function GatewaySettingsDialog({
                   <div className="flex items-center justify-between">
                     <Label>Connection Status</Label>
                     <div className="flex items-center gap-1.5 text-xs">
-                      {state.connectionStatus === "connected" ? (
+                      {gatewayStore.state.connectionStatus === "connected" ? (
                         <><Wifi className="h-3 w-3 text-green-600" /><span className="text-green-600">Connected</span></>
-                      ) : state.connectionStatus === "connecting" ? (
+                      ) : gatewayStore.state.connectionStatus === "connecting" ? (
                         <><Loader2 className="h-3 w-3 text-yellow-500 animate-spin" /><span className="text-yellow-500">Connecting</span></>
                       ) : (
                         <><WifiOff className="h-3 w-3 text-muted-foreground" /><span className="text-muted-foreground">Disconnected</span></>

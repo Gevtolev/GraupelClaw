@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { useAppConfig } from "@/hooks/use-app-config";
-import { useStore } from "@/lib/store-legacy";
+import { useGatewayStore, useAgentStore, useSessionStore, useActions } from "@/lib/store";
 import { projectBrand } from "@/lib/project-brand";
 import { cn } from "@/lib/utils";
 import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
@@ -61,7 +61,10 @@ function CompanyLogo({ logo, name, size = "sm" }: { logo?: string; name?: string
 export function AppSidebar() {
   const { session } = useAuthSession();
   const { multiCompany } = useAppConfig();
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const { state: agentState } = useAgentStore();
+  const { state: sessionState } = useSessionStore();
+  const actions = useActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const [showCreateCompany, setShowCreateCompany] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
@@ -79,15 +82,15 @@ export function AppSidebar() {
 
   // Auto-open create company dialog when no companies exist (after data loaded)
   useEffect(() => {
-    if (state.initialized && state.companies.length === 0) {
+    if (gatewayState.initialized && gatewayState.companies.length === 0) {
       setShowCreateCompany(true);
     }
-  }, [state.initialized, state.companies.length]);
+  }, [gatewayState.initialized, gatewayState.companies.length]);
 
-  const activeCompany = state.companies.find((c) => c.id === state.activeCompanyId);
-  const companyAgents = state.agents.filter((a) => a.companyId === state.activeCompanyId);
-  const companyTeams = state.teams.filter((t) => t.companyId === state.activeCompanyId);
-  const isConnected = state.connectionStatus === "connected";
+  const activeCompany = gatewayState.companies.find((c) => c.id === gatewayState.activeCompanyId);
+  const companyAgents = agentState.agents.filter((a) => a.companyId === gatewayState.activeCompanyId);
+  const companyTeams = agentState.teams.filter((t) => t.companyId === gatewayState.activeCompanyId);
+  const isConnected = gatewayState.connectionStatus === "connected";
 
   return (
     <Sidebar>
@@ -107,8 +110,8 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width] min-w-[240px]" align="start">
-                  {state.companies.map((company) => {
-                    const isActive = company.id === state.activeCompanyId;
+                  {gatewayState.companies.map((company) => {
+                    const isActive = company.id === gatewayState.activeCompanyId;
                     return (
                       <DropdownMenuItem
                         key={company.id}
@@ -180,8 +183,8 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarMenu>
                 {companyAgents.map((agent) => {
-                  const identity = state.agentIdentities[agent.id];
-                  const isActive = state.activeChatTarget?.type === "agent" && state.activeChatTarget?.id === agent.id;
+                  const identity = agentState.agentIdentities[agent.id];
+                  const isActive = sessionState.activeChatTarget?.type === "agent" && sessionState.activeChatTarget?.id === agent.id;
 
                   return (
                     <SidebarMenuItem key={agent.id}>
@@ -236,7 +239,7 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarMenu>
                 {companyTeams.map((team) => {
-                  const isActive = state.activeChatTarget?.type === "team" && state.activeChatTarget?.id === team.id;
+                  const isActive = sessionState.activeChatTarget?.type === "team" && sessionState.activeChatTarget?.id === team.id;
                   return (
                     <SidebarMenuItem key={team.id}>
                       <SidebarMenuButton
@@ -311,10 +314,10 @@ export function AppSidebar() {
         open={showCreateCompany}
         onOpenChange={(open) => {
           // Prevent closing if no companies exist
-          if (!open && state.companies.length === 0) return;
+          if (!open && gatewayState.companies.length === 0) return;
           setShowCreateCompany(open);
         }}
-        required={state.companies.length === 0}
+        required={gatewayState.companies.length === 0}
       />
       <CreateAgentDialog open={showCreateAgent} onOpenChange={setShowCreateAgent} />
       <CreateTeamDialog open={showCreateTeam} onOpenChange={setShowCreateTeam} />

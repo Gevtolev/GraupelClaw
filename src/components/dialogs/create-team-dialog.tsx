@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store-legacy";
+import { useGatewayStore, useAgentStore } from "@/lib/store";
 import { getAgentAvatarUrl } from "@/lib/avatar";
 import { Check } from "lucide-react";
 
@@ -21,7 +21,8 @@ export function CreateTeamDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const agentStore = useAgentStore();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
@@ -34,7 +35,7 @@ export function CreateTeamDialog({
       ? tlAgentId
       : (selectedAgentIds[0] ?? null);
 
-  const companyAgents = state.agents.filter((a) => a.companyId === state.activeCompanyId);
+  const companyAgents = agentStore.state.agents.filter((a) => a.companyId === gatewayState.activeCompanyId);
 
   function toggleAgent(id: string) {
     setSelectedAgentIds((prev) =>
@@ -43,9 +44,9 @@ export function CreateTeamDialog({
   }
 
   async function handleCreate() {
-    if (!name.trim() || !state.activeCompanyId || selectedAgentIds.length === 0) return;
-    await actions.createTeam({
-      companyId: state.activeCompanyId,
+    if (!name.trim() || !gatewayState.activeCompanyId || selectedAgentIds.length === 0) return;
+    await agentStore.createTeam({
+      companyId: gatewayState.activeCompanyId,
       name: name.trim(),
       description: description.trim() || undefined,
       agentIds: selectedAgentIds,

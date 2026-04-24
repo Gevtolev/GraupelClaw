@@ -19,7 +19,7 @@ import {
   Clock,
   Crown,
 } from "lucide-react";
-import { useStore } from "@/lib/store-legacy";
+import { useGatewayStore, useAgentStore, useSessionStore, useChatStore, useActions } from "@/lib/store";
 import { resolveTlAgentId } from "@/lib/team";
 import { projectBrand } from "@/lib/project-brand";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
@@ -170,7 +170,11 @@ function CopyMessageButton({ content }: { content: string }) {
 }
 
 export function ChatArea() {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const { state: agentState } = useAgentStore();
+  const { state: sessionState } = useSessionStore();
+  const { state: chatState } = useChatStore();
+  const actions = useActions();
   const [input, setInput] = useState("");
   const [composing, setComposing] = useState(false);
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
@@ -183,8 +187,8 @@ export function ChatArea() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
-  const target = state.activeChatTarget;
-  const isConnected = state.connectionStatus === "connected";
+  const target = sessionState.activeChatTarget;
+  const isConnected = gatewayState.connectionStatus === "connected";
   const userProfile = loadUserProfile();
 
   // Auto-open sessions panel when an Agent is selected
@@ -196,20 +200,20 @@ export function ChatArea() {
 
   // Get chat target info
   const targetAgent = target?.type === "agent"
-    ? state.agents.find((a) => a.id === target.id)
+    ? agentState.agents.find((a) => a.id === target.id)
     : null;
   const targetTeam = target?.type === "team"
-    ? state.teams.find((t) => t.id === target.id)
+    ? agentState.teams.find((t) => t.id === target.id)
     : null;
   const teamAgents = targetTeam
-    ? state.agents.filter((a) => targetTeam.agentIds.includes(a.id))
+    ? agentState.agents.filter((a) => targetTeam.agentIds.includes(a.id))
     : [];
   const tlAgentId = targetTeam ? resolveTlAgentId(targetTeam) : null;
 
   // Streaming entries for current chat target
-  const streamingEntries = Object.entries(state.streamingStates).filter(
+  const streamingEntries = Object.entries(chatState.streamingStates).filter(
     ([, s]) => target && s.targetType === target.type && s.targetId === target.id && s.isStreaming
-      && (!s.conversationId || s.conversationId === state.activeConversationId)
+      && (!s.conversationId || s.conversationId === sessionState.activeConversationId)
   );
 
   // Auto-scroll only when user is near the bottom
@@ -218,20 +222,20 @@ export function ChatArea() {
     if (isNearBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [state.messages, streamingEntries]);
+  }, [sessionState.messages, streamingEntries]);
 
   // Scroll to bottom when entering a conversation or when messages load
-  const prevConvRef = useRef(state.activeConversationId);
+  const prevConvRef = useRef(sessionState.activeConversationId);
   useEffect(() => {
-    if (state.activeConversationId !== prevConvRef.current) {
-      prevConvRef.current = state.activeConversationId;
+    if (sessionState.activeConversationId !== prevConvRef.current) {
+      prevConvRef.current = sessionState.activeConversationId;
       isNearBottomRef.current = true;
     }
-  }, [state.activeConversationId]);
+  }, [sessionState.activeConversationId]);
 
   // After messages change and we just switched conversations, scroll to bottom
   useEffect(() => {
-    if (isNearBottomRef.current && state.messages.length > 0) {
+    if (isNearBottomRef.current && sessionState.messages.length > 0) {
       // Use requestAnimationFrame to wait for DOM render
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -239,7 +243,7 @@ export function ChatArea() {
         });
       });
     }
-  }, [state.activeConversationId, state.messages.length]);
+  }, [sessionState.activeConversationId, sessionState.messages.length]);
 
   // Auto-focus
   useEffect(() => {
@@ -399,7 +403,7 @@ export function ChatArea() {
   }
 
   const chatTitle = target.type === "agent"
-    ? (state.agentIdentities[target.id]?.name || targetAgent?.name || "Agent")
+    ? (agentState.agentIdentities[target.id]?.name || targetAgent?.name || "Agent")
     : (targetTeam?.name || "Team");
 
   const chatSubtitle = undefined;
@@ -444,7 +448,7 @@ export function ChatArea() {
         {target.type === "team" && teamAgents.length > 0 && (
           <div className="ml-auto flex items-center -space-x-2">
             {teamAgents.slice(0, 3).map((agent) => {
-              const identity = state.agentIdentities[agent.id];
+              const identity = agentState.agentIdentities[agent.id];
               const isTl = agent.id === tlAgentId;
               return (
                 <div key={agent.id} className="relative" title={isTl ? "Team Leader" : (identity?.name || agent.name)}>
@@ -486,14 +490,14 @@ export function ChatArea() {
 
       {/* Messages */}
       <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 px-4 py-4 space-y-4 relative">
-        {state.messages.length === 0 && streamingEntries.length === 0 && state.nativeSessionsLoading && (
+        {sessionState.messages.length === 0 && streamingEntries.length === 0 && sessionState.nativeSessionsLoading && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin mb-3" />
             <p className="text-sm">Loading messages...</p>
           </div>
         )}
 
-        {state.messages.length === 0 && streamingEntries.length === 0 && !state.nativeSessionsLoading && (
+        {sessionState.messages.length === 0 && streamingEntries.length === 0 && !sessionState.nativeSessionsLoading && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             {target.type === "agent" ? (
               isEmojiAvatar(targetAgent?.avatar) ? (
@@ -525,12 +529,12 @@ export function ChatArea() {
           </div>
         )}
 
-        {state.messages.map((msg) => {
+        {sessionState.messages.map((msg) => {
           const agent = msg.agentId
-            ? state.agents.find((a) => a.id === msg.agentId)
+            ? agentState.agents.find((a) => a.id === msg.agentId)
             : null;
           const identity = msg.agentId
-            ? state.agentIdentities[msg.agentId]
+            ? agentState.agentIdentities[msg.agentId]
             : null;
           const isUser = msg.role === "user";
           const time = new Date(msg.createdAt).toLocaleTimeString([], {
@@ -624,8 +628,8 @@ export function ChatArea() {
                 {msg.role === "assistant" && (
                   <button
                     onClick={() => {
-                      const msgIndex = state.messages.findIndex(m => m.id === msg.id);
-                      const lastUserMsg = [...state.messages].slice(0, msgIndex).reverse().find(m => m.role === "user");
+                      const msgIndex = sessionState.messages.findIndex(m => m.id === msg.id);
+                      const lastUserMsg = [...sessionState.messages].slice(0, msgIndex).reverse().find(m => m.role === "user");
                       if (lastUserMsg) {
                         actions.sendMessage(lastUserMsg.content);
                       }
@@ -643,8 +647,8 @@ export function ChatArea() {
 
         {/* Streaming messages */}
         {streamingEntries.map(([agentId, streaming]) => {
-          const agent = state.agents.find((a) => a.id === agentId);
-          const identity = state.agentIdentities[agentId];
+          const agent = agentState.agents.find((a) => a.id === agentId);
+          const identity = agentState.agentIdentities[agentId];
 
           return (
             <div key={agentId} className="flex gap-4 py-0.5 -mx-4 px-4">
@@ -703,7 +707,7 @@ export function ChatArea() {
             <div className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
               Dispatching to {streamingEntries.map(([id]) => {
-                const a = state.agents.find(x => x.id === id);
+                const a = agentState.agents.find(x => x.id === id);
                 return a?.name ?? id;
               }).join(", ")}
             </div>
@@ -711,11 +715,11 @@ export function ChatArea() {
         )}
 
         {target?.type === "team" &&
-         state.lastCascadeStatus &&
-         state.lastCascadeStatus.conversationId === state.activeConversationId && (
+         chatState.lastCascadeStatus &&
+         chatState.lastCascadeStatus.conversationId === sessionState.activeConversationId && (
           <div className="mx-auto mb-2 max-w-3xl px-4">
             <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              {cascadeBanner(state.lastCascadeStatus.reason, state.lastCascadeStatus.hop)}
+              {cascadeBanner(chatState.lastCascadeStatus.reason, chatState.lastCascadeStatus.hop)}
             </div>
           </div>
         )}
