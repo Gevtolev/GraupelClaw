@@ -1,4 +1,4 @@
-import type { AgentTeam, MessageAttachment, AppState } from "@/types";
+import type { Agent, AgentTeam, AgentIdentity, Message, MessageAttachment } from "@/types";
 
 export interface Mention {
   name: string;
@@ -28,6 +28,13 @@ export interface DispatchReply {
 
 export type OnCascadeStoppedReason = "max_hops" | "loop" | "abort";
 
+export interface TeamDispatchState {
+  agents: Agent[];
+  teams: AgentTeam[];
+  messages: Message[];
+  agentIdentities: Record<string, AgentIdentity>;
+}
+
 export interface DispatchOpts {
   team: AgentTeam;
   conversationId: string;
@@ -35,7 +42,7 @@ export interface DispatchOpts {
   userContent: string;
   attachments?: MessageAttachment[];
   maxHops?: number;
-  getState: () => AppState;
+  getState: () => TeamDispatchState;
   sendToAgent: (
     agentId: string,
     sessionKey: string,

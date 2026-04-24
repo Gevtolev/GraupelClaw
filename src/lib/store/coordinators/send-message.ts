@@ -1,6 +1,6 @@
 import type React from "react";
 import type {
-  AppState, ChatTarget, Message, MessageAttachment, Conversation,
+  ChatTarget, Message, MessageAttachment, Conversation,
 } from "@/types";
 import type { RuntimeClient } from "@/lib/runtime";
 import type { GatewayState } from "@/lib/store/gateway/types";
@@ -219,13 +219,12 @@ async function sendToTeam(
     rootUserMessageId: userMsgId,
     userContent: content,
     attachments,
-    // TODO: Task 10 narrow team DispatchOpts.getState
     getState: () => ({
       agents: agentState.agents,
       teams: agentState.teams,
       messages: deps.getSessionState().messages,
       agentIdentities: agentState.agentIdentities,
-    }) as unknown as AppState,
+    }),
     sendToAgent: sendToAgentFn,
     isAborted: cid => deps.teamAbortedRef.current.get(cid) === true,
     onCascadeStopped: ({ reason, hop }) => {

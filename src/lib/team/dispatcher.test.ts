@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Agent, AgentTeam, AppState, Message } from "@/types";
+import type { Agent, AgentTeam, Message } from "@/types";
+import type { TeamDispatchState } from "./types";
 import { dispatchTeamMessage } from "./dispatcher";
 
 function team(agentIds: string[], tlAgentId?: string): AgentTeam {
@@ -10,14 +11,8 @@ function agent(id: string, name: string): Agent {
   return { id, companyId: "c1", name, description: "", specialty: "general", createdAt: 0 };
 }
 
-function state(agents: Agent[], teams: AgentTeam[], messages: Message[] = []): AppState {
-  return {
-    companies: [], agents, teams, messages, conversations: [],
-    activeCompanyId: null, activeChatTarget: null, activeConversationId: null,
-    connectionStatus: "connected", agentIdentities: {}, streamingStates: {},
-    nativeSessionsLoading: false, nativeSessionsError: null,
-    initialized: true, lastCascadeStatus: null,
-  } as AppState;
+function state(agents: Agent[], teams: AgentTeam[], messages: Message[] = []): TeamDispatchState {
+  return { agents, teams, messages, agentIdentities: {} };
 }
 
 const buildSessionKey = (agentId: string, teamId: string, cid: string) =>
