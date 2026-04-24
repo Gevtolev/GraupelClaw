@@ -29,7 +29,8 @@ import { loadUserProfile } from "@/components/dialogs/user-profile-dialog";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { v4 as uuidv4 } from "uuid";
-import type { StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
+import { MentionAutocomplete } from "@/components/team/mention-autocomplete";
+import type { Agent, StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
 
 function StreamingIndicator({ phase }: { phase: StreamingPhase }) {
   return (
@@ -175,6 +176,8 @@ export function ChatArea() {
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showConvPanel, setShowConvPanel] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionAnchor, setMentionAnchor] = useState<DOMRect | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -341,6 +344,38 @@ export function ChatArea() {
     },
     [handleSend, composing]
   );
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    const pos = e.target.selectionStart ?? 0;
+    const before = e.target.value.slice(0, pos);
+    const match = before.match(/@([\w-]*)$/);
+    if (match && target?.type === "team") {
+      setMentionQuery(match[1]);
+      const rect = e.target.getBoundingClientRect();
+      setMentionAnchor(rect);
+    } else {
+      setMentionQuery(null);
+      setMentionAnchor(null);
+    }
+  }
+
+  function insertMention(agent: Agent) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const pos = textarea.selectionStart ?? 0;
+    const before = input.slice(0, pos).replace(/@([\w-]*)$/, "");
+    const after = input.slice(pos);
+    const inserted = `@[${agent.name}](${agent.id}) `;
+    setInput(before + inserted + after);
+    setMentionQuery(null);
+    setMentionAnchor(null);
+    requestAnimationFrame(() => {
+      const newPos = (before + inserted).length;
+      textarea.setSelectionRange(newPos, newPos);
+      textarea.focus();
+    });
+  }
 
   // No target selected — empty state
   if (!target) {
@@ -734,7 +769,7 @@ export function ChatArea() {
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={() => setComposing(false)}
@@ -745,6 +780,15 @@ export function ChatArea() {
             className="w-full resize-none bg-transparent px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
             style={{ maxHeight: 200, minHeight: 72 }}
           />
+          {mentionQuery !== null && target?.type === "team" && (
+            <MentionAutocomplete
+              candidates={teamAgents.map(a => ({ agent: a }))}
+              query={mentionQuery}
+              onSelect={insertMention}
+              onClose={() => { setMentionQuery(null); setMentionAnchor(null); }}
+              anchorRect={mentionAnchor}
+            />
+          )}
         </div>
 
         {/* Toolbar row - bottom */}
