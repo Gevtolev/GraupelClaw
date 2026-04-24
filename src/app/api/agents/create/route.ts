@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectGatewayWs } from "@/lib/gateway-ws";
+import { generateWorkspaceFiles } from "@/lib/agent-templates";
 
 export async function POST(request: Request) {
   try {
@@ -40,11 +41,12 @@ export async function POST(request: Request) {
       if (!Array.isArray(agents.list)) agents.list = [];
 
       // Add agent if not already present
-      const list = agents.list as Array<{ id: string; name: string; workspace: string }>;
+      const list = agents.list as Array<{ id: string; name: string; identity?: { name: string }; workspace: string }>;
       if (!list.find(a => a.id === agentId)) {
         list.push({
           id: agentId,
           name,
+          identity: { name },
           workspace: `~/.openclaw/workspace-${agentId}`,
         });
       }
@@ -55,23 +57,17 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Failed to write config: ${setRes.error?.message}` }, { status: 502 });
       }
 
-      // Initialize all workspace files
-      const soulContent = `# Soul of ${name}\n\nI am ${name}, an AI agent.\n\n## Personality\n\n${description || "A helpful AI assistant."}\n\n## Communication Style\n\n- Be concise but thorough\n- Use markdown formatting when helpful\n- Provide examples when explaining concepts\n- Ask clarifying questions when the request is ambiguous\n`;
-      const identityContent = `# ${name}\n\n## Role\n${specialty || "AI Assistant"}\n\n## Description\n${description || `I am ${name}, ready to help with your tasks.`}\n`;
-
-      const allFiles: Record<string, string> = {
-        "SOUL.md": soulContent,
-        "IDENTITY.md": identityContent,
-        "AGENTS.md": "",
-        "USER.md": "",
-        "TOOLS.md": "",
-        "HEARTBEAT.md": "",
-        "BOOTSTRAP.md": "",
-        "MEMORY.md": "",
-      };
+      // Write specialty-differentiated SOUL.md and IDENTITY.md only.
+      // AGENTS.md, TOOLS.md, USER.md, HEARTBEAT.md are populated by OpenClaw's
+      // ensureAgentWorkspace on first session use via writeFileIfMissing.
+      const workspaceFiles = await generateWorkspaceFiles({
+        name,
+        description: description || `I am ${name}, ready to help with your tasks.`,
+        specialty,
+      });
 
       await Promise.allSettled(
-        Object.entries(allFiles).map(([file, content]) =>
+        Object.entries(workspaceFiles).map(([file, content]) =>
           conn.call("agents.files.set", { agentId, name: file, content })
         )
       );

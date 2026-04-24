@@ -46,3 +46,13 @@ REQUIREMENTS.md
 
 # SQLite data directory
 /data
+
+# Playwright
+/.playwright/
+/.playwright-mcp/
+
+# Accio
+.accio/
+
+# Screenshots (local-only, not versioned)
+/docs/screenshot/

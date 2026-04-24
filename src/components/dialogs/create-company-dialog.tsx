@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useActions } from "@/lib/store";
 import { testConnection } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
@@ -36,7 +36,8 @@ export function CreateCompanyDialog({
   onOpenChange: (open: boolean) => void;
   required?: boolean;
 }) {
-  const { state, actions } = useStore();
+  const gatewayStore = useGatewayStore();
+  const actions = useActions();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [gatewayUrl, setGatewayUrl] = useState("");
@@ -97,7 +98,7 @@ export function CreateCompanyDialog({
     // Check for duplicate gateway URL
     if (gatewayUrl.trim()) {
       const normalized = normalizeGatewayUrl(gatewayUrl);
-      const existing = state.companies.find(
+      const existing = gatewayStore.state.companies.find(
         (c) => c.gatewayUrl && normalizeGatewayUrl(c.gatewayUrl) === normalized
       );
       if (existing) {
@@ -106,7 +107,7 @@ export function CreateCompanyDialog({
       }
     }
 
-    const company = await actions.createCompany(
+    const company = await gatewayStore.createCompany(
       name.trim(),
       gatewayUrl.trim(),
       gatewayToken.trim(),

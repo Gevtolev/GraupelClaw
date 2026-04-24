@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useAgentStore, useActions } from "@/lib/store";
 import {
   User,
   FileCode,
@@ -31,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { projectBrand } from "@/lib/project-brand";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/types";
@@ -70,8 +70,10 @@ export function AgentSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
-  const activeCompany = state.companies.find((c) => c.id === state.activeCompanyId);
+  const { state: gatewayState } = useGatewayStore();
+  const agentStore = useAgentStore();
+  const actions = useActions();
+  const activeCompany = gatewayState.companies.find((c) => c.id === gatewayState.activeCompanyId);
   const gwHeaders: Record<string, string> = {
     "x-gateway-url": activeCompany?.gatewayUrl || "",
     "x-gateway-token": activeCompany?.gatewayToken || "",
@@ -175,7 +177,7 @@ export function AgentSettingsDialog({
     if (updates.name !== undefined && updates.name.trim() !== agent.name) {
       merged.customName = true;
     }
-    await actions.updateAgent(agent.id, merged);
+    await agentStore.updateAgent(agent.id, merged);
   }
 
   function handleGeneralBlur() {
@@ -215,7 +217,7 @@ export function AgentSettingsDialog({
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{avatar}</span>
                 ) : (
                   <img
-                    src={avatar || getAgentAvatarUrl(agent.id)}
+                    src={isImageAvatar(avatar) ? avatar : getAgentAvatarUrl(agent.id)}
                     alt={agent.name}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />

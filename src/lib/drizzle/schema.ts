@@ -42,6 +42,7 @@ export const teams = sqliteTable("teams", {
   avatar: text("avatar"),
   description: text("description"),
   agentIds: text("agent_ids").notNull().default("[]"),
+  tlAgentId: text("tl_agent_id"),
   createdAt: integer("created_at").notNull(),
 });
 

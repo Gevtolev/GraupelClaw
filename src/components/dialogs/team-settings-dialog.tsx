@@ -16,13 +16,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/lib/store";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { useAgentStore, useActions } from "@/lib/store";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import {
-  Users, UserPlus, Wrench, Trash2, ChevronRight, Check, X,
+  Users, UserPlus, Wrench, Trash2, ChevronRight, Check, X, Crown,
 } from "lucide-react";
 import { AvatarPicker } from "@/components/avatar-picker";
+import { resolveTlAgentId } from "@/lib/team";
 import type { AgentTeam } from "@/types";
 
 type Section = "general" | "members" | "advanced";
@@ -42,21 +43,32 @@ export function TeamSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const agentStore = useAgentStore();
+  const actions = useActions();
   const [name, setName] = useState(team.name);
   const [avatar, setAvatar] = useState(team.avatar || "");
   const [description, setDescription] = useState(team.description || "");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(team.agentIds);
+  const [localTlAgentId, setLocalTlAgentId] = useState<string | undefined>(
+    team.tlAgentId ?? undefined,
+  );
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const companyAgents = state.agents.filter((a) => a.companyId === team.companyId);
+  const companyAgents = agentStore.state.agents.filter((a) => a.companyId === team.companyId);
+  const effectiveTeam: AgentTeam = {
+    ...team,
+    agentIds: selectedAgentIds,
+    tlAgentId: localTlAgentId,
+  };
+  const currentTlId = resolveTlAgentId(effectiveTeam);
 
   useEffect(() => {
     setName(team.name);
     setAvatar(team.avatar || "");
     setDescription(team.description || "");
     setSelectedAgentIds(team.agentIds);
+    setLocalTlAgentId(team.tlAgentId ?? undefined);
     setActiveSection("general");
   }, [team]);
 
@@ -68,21 +80,24 @@ export function TeamSettingsDialog({
       agentIds: updates.agentIds ?? selectedAgentIds,
     };
     if (!merged.name || merged.agentIds.length === 0) return;
-    await actions.updateTeam(team.id, merged);
+    await agentStore.updateTeam(team.id, merged);
   }
 
   function toggleAgent(id: string) {
     setSelectedAgentIds((prev) => {
       const next = prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id];
-      // Auto-save with new agent list
-      const merged = {
+      const merged: Partial<AgentTeam> = {
         name: name.trim(),
         avatar: avatar || undefined,
         description: description.trim() || undefined,
         agentIds: next,
       };
+      if (team.tlAgentId === id && !next.includes(id)) {
+        merged.tlAgentId = null;
+        setLocalTlAgentId(undefined);
+      }
       if (merged.name && next.length > 0) {
-        actions.updateTeam(team.id, merged);
+        agentStore.updateTeam(team.id, merged);
       }
       return next;
     });
@@ -238,29 +253,56 @@ export function TeamSettingsDialog({
                   <div className="space-y-1">
                     {companyAgents.map((agent) => {
                       const selected = selectedAgentIds.includes(agent.id);
+                      const isTl = selected && agent.id === currentTlId;
                       return (
-                        <button
+                        <div
                           key={agent.id}
-                          onClick={() => toggleAgent(agent.id)}
                           className={cn(
-                            "flex w-full items-center gap-2 rounded-md p-2 transition-colors",
-                            selected
-                              ? "bg-primary/20 text-foreground"
-                              : "hover:bg-accent/50 text-muted-foreground"
+                            "flex w-full items-center gap-2 rounded-md p-2",
+                            selected ? "bg-primary/20" : "hover:bg-accent/50",
                           )}
                         >
-                          {isEmojiAvatar(agent.avatar) ? (
-                            <span className="h-6 w-6 flex items-center justify-center text-sm">{agent.avatar}</span>
-                          ) : (
-                            <img
-                              src={agent.avatar || getAgentAvatarUrl(agent.id)}
-                              alt={agent.name}
-                              className="h-6 w-6 rounded-full bg-muted object-cover"
-                            />
+                          <button
+                            onClick={() => toggleAgent(agent.id)}
+                            className="flex flex-1 items-center gap-2 text-left"
+                          >
+                            {isEmojiAvatar(agent.avatar) ? (
+                              <span className="h-6 w-6 flex items-center justify-center text-sm">{agent.avatar}</span>
+                            ) : (
+                              <img
+                                src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                                alt={agent.name}
+                                className="h-6 w-6 rounded-full bg-muted object-cover"
+                              />
+                            )}
+                            <span className="text-sm">{agent.name}</span>
+                            {isTl && (
+                              <span className="ml-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                TL
+                              </span>
+                            )}
+                            {selected && <Check className="ml-auto h-4 w-4 text-green-600" />}
+                          </button>
+                          {selected && (
+                            <button
+                              onClick={() => {
+                                if (agent.id !== currentTlId) {
+                                  setLocalTlAgentId(agent.id);
+                                  agentStore.updateTeam(team.id, { tlAgentId: agent.id });
+                                }
+                              }}
+                              title={isTl ? "Current Team Leader" : "Set as Team Leader"}
+                              className={cn(
+                                "rounded p-1 transition-colors",
+                                isTl
+                                  ? "text-amber-500"
+                                  : "text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10",
+                              )}
+                            >
+                              <Crown className={cn("h-4 w-4", isTl && "fill-current")} />
+                            </button>
                           )}
-                          <span className="text-sm flex-1 text-left">{agent.name}</span>
-                          {selected && <Check className="h-4 w-4 text-green-600" />}
-                        </button>
+                        </div>
                       );
                     })}
                     {companyAgents.length === 0 && (

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useAgentStore } from "@/lib/store";
 import { getAgentAvatarUrl } from "@/lib/avatar";
 import { Check } from "lucide-react";
 
@@ -21,12 +21,21 @@ export function CreateTeamDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const agentStore = useAgentStore();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  const [tlAgentId, setTlAgentId] = useState<string | null>(null);
 
-  const companyAgents = state.agents.filter((a) => a.companyId === state.activeCompanyId);
+  // Derive the effective TL without an effect — invalid or unset tlAgentId falls
+  // back to the first selected member. This avoids a setState-in-effect cascade.
+  const effectiveTlAgentId =
+    tlAgentId && selectedAgentIds.includes(tlAgentId)
+      ? tlAgentId
+      : (selectedAgentIds[0] ?? null);
+
+  const companyAgents = agentStore.state.agents.filter((a) => a.companyId === gatewayState.activeCompanyId);
 
   function toggleAgent(id: string) {
     setSelectedAgentIds((prev) =>
@@ -35,16 +44,18 @@ export function CreateTeamDialog({
   }
 
   async function handleCreate() {
-    if (!name.trim() || !state.activeCompanyId || selectedAgentIds.length === 0) return;
-    await actions.createTeam({
-      companyId: state.activeCompanyId,
+    if (!name.trim() || !gatewayState.activeCompanyId || selectedAgentIds.length === 0) return;
+    await agentStore.createTeam({
+      companyId: gatewayState.activeCompanyId,
       name: name.trim(),
       description: description.trim() || undefined,
       agentIds: selectedAgentIds,
+      tlAgentId: effectiveTlAgentId ?? undefined,
     });
     setName("");
     setDescription("");
     setSelectedAgentIds([]);
+    setTlAgentId(null);
     onOpenChange(false);
   }
 
@@ -108,6 +119,28 @@ export function CreateTeamDialog({
             <p className="text-sm text-muted-foreground italic">
               Add agents first before creating a team.
             </p>
+          )}
+          {selectedAgentIds.length > 0 && (
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Team Leader</label>
+              <select
+                value={effectiveTlAgentId ?? ""}
+                onChange={(e) => setTlAgentId(e.target.value)}
+                className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                {selectedAgentIds.map((id) => {
+                  const a = companyAgents.find((x) => x.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {a?.name ?? id}
+                    </option>
+                  );
+                })}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                TL coordinates the team. Non-mention user messages go to the TL first.
+              </p>
+            </div>
           )}
         </div>
         <DialogFooter>

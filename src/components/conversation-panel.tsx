@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useSessionStore, useChatStore, useActions } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon, Loader2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -17,25 +17,28 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export function ConversationPanel({ onClose }: { onClose?: () => void }) {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const sessionStore = useSessionStore();
+  const { state: chatState } = useChatStore();
+  const actions = useActions();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const target = state.activeChatTarget;
+  const target = sessionStore.state.activeChatTarget;
   if (!target) return null;
 
   const isAgentSessions = target.type === "agent";
 
-  const conversations = state.conversations.filter(
+  const conversations = sessionStore.state.conversations.filter(
     c => c.targetType === target.type && c.targetId === target.id
   );
 
-  const isStreaming = Object.values(state.streamingStates).some(
+  const isStreaming = Object.values(chatState.streamingStates).some(
     s => s.isStreaming && s.targetType === target.type && s.targetId === target.id
   );
 
-  const { nativeSessionsLoading, nativeSessionsError } = state;
+  const { nativeSessionsLoading, nativeSessionsError } = sessionStore.state;
 
   return (
     <div className="flex flex-col h-full">
@@ -44,7 +47,7 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
         <MessageCircle className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-medium flex-1">{isAgentSessions ? "Sessions" : "Conversations"}</span>
         <button
-          onClick={() => actions.createConversation(target.type, target.id)}
+          onClick={() => sessionStore.createConversation(target.type, target.id, gatewayState.activeCompanyId)}
           className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
           title={isAgentSessions ? "New session" : "New conversation"}
           disabled={isAgentSessions && nativeSessionsLoading}
@@ -82,7 +85,7 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
           </p>
         ) : (
           conversations.map(conv => {
-            const isActive = state.activeConversationId === conv.id;
+            const isActive = sessionStore.state.activeConversationId === conv.id;
             const isEditing = editingId === conv.id;
             const isNativeSession = conv.source === "native-session";
             const time = new Date(conv.updatedAt).toLocaleDateString([], {
@@ -109,14 +112,14 @@ export function ConversationPanel({ onClose }: { onClose?: () => void }) {
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === "Enter") {
-                          actions.renameConversation(conv.id, editTitle);
+                          sessionStore.renameConversation(conv.id, editTitle);
                           setEditingId(null);
                         }
                         if (e.key === "Escape") setEditingId(null);
                       }}
                     />
                     <button
-                      onClick={e => { e.stopPropagation(); actions.renameConversation(conv.id, editTitle); setEditingId(null); }}
+                      onClick={e => { e.stopPropagation(); sessionStore.renameConversation(conv.id, editTitle); setEditingId(null); }}
                       className="p-0.5 text-green-500"
                     >
                       <Check className="h-3 w-3" />

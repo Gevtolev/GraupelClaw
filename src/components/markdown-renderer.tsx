@@ -167,7 +167,7 @@ function preprocessContent(content: string, agentId?: string): string {
 
 const MEDIA_MARKER_RE = /%%MEDIA\|(audio|video|file)\|([^|]+)\|((?:[^%]|%(?!%))*)%%/g;
 
-export function MarkdownRenderer({ content, agentId }: { content: string; agentId?: string }) {
+export function MarkdownRenderer({ content, agentId, teamAgentIds }: { content: string; agentId?: string; teamAgentIds?: Set<string> }) {
   const processed = preprocessContent(content, agentId);
 
   // Split content by media markers and render each segment
@@ -180,7 +180,7 @@ export function MarkdownRenderer({ content, agentId }: { content: string; agentI
     // Render markdown text before this marker
     const textBefore = processed.slice(lastIndex, match.index).trim();
     if (textBefore) {
-      parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={textBefore} />);
+      parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={textBefore} teamAgentIds={teamAgentIds} />);
     }
     // Render the media component
     const [, type, name, src] = match;
@@ -197,18 +197,18 @@ export function MarkdownRenderer({ content, agentId }: { content: string; agentI
   // Remaining text after last marker
   const remaining = processed.slice(lastIndex).trim();
   if (remaining) {
-    parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={remaining} />);
+    parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={remaining} teamAgentIds={teamAgentIds} />);
   }
 
   // If no media markers found, render as single markdown
   if (parts.length === 0) {
-    return <MarkdownSegment content={processed} />;
+    return <MarkdownSegment content={processed} teamAgentIds={teamAgentIds} />;
   }
 
   return <>{parts}</>;
 }
 
-function MarkdownSegment({ content }: { content: string }) {
+function MarkdownSegment({ content, teamAgentIds }: { content: string; teamAgentIds?: Set<string> }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -304,6 +304,15 @@ function MarkdownSegment({ content }: { content: string }) {
           );
         },
         a({ href, children }) {
+          const agentId = href ?? "";
+          if (teamAgentIds?.has(agentId)) {
+            const label = Array.isArray(children) ? children.join("") : String(children ?? "");
+            return (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/30 mx-0.5">
+                @{label.replace(/^@/, "")}
+              </span>
+            );
+          }
           return (
             <a
               href={href}

@@ -2,7 +2,7 @@
 
 export type StreamingPhase = "connecting" | "thinking" | "tool-calling" | "responding";
 
-export type ChatState = "delta" | "message_done" | "final" | "error" | "aborted";
+export type ChatEventState = "delta" | "message_done" | "final" | "error" | "aborted";
 
 export interface ChatMessageTextContent {
   type: "text";
@@ -29,7 +29,7 @@ export interface ChatMessage {
 export interface ChatEventPayload {
   runId: string;
   sessionKey: string;
-  state: ChatState;
+  state: ChatEventState;
   message: ChatMessage;
   error?: string;
   toolCalls?: ToolCallContent[];
@@ -83,7 +83,7 @@ export interface Company {
   updatedAt: number;
 }
 
-export type AgentSpecialty = "coding" | "research" | "writing" | "design" | "general";
+export type AgentSpecialty = "coding" | "research" | "writing" | "design" | "product" | "general";
 
 export interface Agent {
   id: string;
@@ -103,6 +103,7 @@ export interface AgentTeam {
   avatar?: string;
   description?: string;
   agentIds: string[];
+  tlAgentId?: string | null;
   createdAt: number;
 }
 
@@ -141,44 +142,3 @@ export interface Message {
   createdAt: number;
 }
 
-// ── Store Types ─────────────────────────────────────────────────────
-
-export interface AppState {
-  // Data
-  companies: Company[];
-  agents: Agent[];
-  teams: AgentTeam[];
-  messages: Message[];
-  conversations: Conversation[];
-
-  // Selection
-  activeCompanyId: string | null;
-  activeChatTarget: ChatTarget | null;
-  activeConversationId: string | null;
-
-  // Gateway connection (shared)
-  connectionStatus: ConnectionStatus;
-
-  // Agent identities
-  agentIdentities: Record<string, AgentIdentity>;
-
-  // Streaming - keyed by agentId
-  streamingStates: Record<string, {
-    isStreaming: boolean;
-    content: string;
-    toolCalls: ToolCallContent[];
-    runId: string | null;
-    targetType: ChatTargetType;
-    targetId: string;
-    conversationId: string;
-    sessionKey: string;
-    phase: StreamingPhase;
-  }>;
-
-  // Native sessions loading
-  nativeSessionsLoading: boolean;
-  nativeSessionsError: string | null;
-
-  // UI
-  initialized: boolean;
-}

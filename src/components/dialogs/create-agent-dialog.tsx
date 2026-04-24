@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useActions } from "@/lib/store";
 import { Loader2 } from "lucide-react";
 import type { AgentSpecialty } from "@/types";
 
@@ -20,6 +20,7 @@ const specialties: { value: AgentSpecialty; label: string; desc: string }[] = [
   { value: "research", label: "Research", desc: "Analyst & researcher" },
   { value: "writing", label: "Writing", desc: "Content creator" },
   { value: "design", label: "Design", desc: "UI/UX designer" },
+  { value: "product", label: "Product Manager", desc: "Requirements & product lifecycle" },
 ];
 
 export function CreateAgentDialog({
@@ -29,7 +30,8 @@ export function CreateAgentDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const actions = useActions();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [specialty, setSpecialty] = useState<AgentSpecialty>("general");
@@ -37,12 +39,12 @@ export function CreateAgentDialog({
   const [error, setError] = useState("");
 
   async function handleCreate() {
-    if (!name.trim() || !state.activeCompanyId || creating) return;
+    if (!name.trim() || !gatewayState.activeCompanyId || creating) return;
     setCreating(true);
     setError("");
     try {
       await actions.createAgent({
-        companyId: state.activeCompanyId,
+        companyId: gatewayState.activeCompanyId,
         name: name.trim(),
         description: description.trim(),
         specialty,

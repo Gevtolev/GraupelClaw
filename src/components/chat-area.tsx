@@ -17,17 +17,20 @@ import {
   X,
   File as FileIcon,
   Clock,
+  Crown,
 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useGatewayStore, useAgentStore, useSessionStore, useChatStore, useActions } from "@/lib/store";
+import { resolveTlAgentId } from "@/lib/team";
 import { projectBrand } from "@/lib/project-brand";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { cn } from "@/lib/utils";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { loadUserProfile } from "@/components/dialogs/user-profile-dialog";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { v4 as uuidv4 } from "uuid";
-import type { StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
+import { MentionAutocomplete } from "@/components/team/mention-autocomplete";
+import type { Agent, StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
 
 function StreamingIndicator({ phase }: { phase: StreamingPhase }) {
   return (
@@ -167,19 +170,25 @@ function CopyMessageButton({ content }: { content: string }) {
 }
 
 export function ChatArea() {
-  const { state, actions } = useStore();
+  const { state: gatewayState } = useGatewayStore();
+  const { state: agentState } = useAgentStore();
+  const { state: sessionState } = useSessionStore();
+  const { state: chatState } = useChatStore();
+  const actions = useActions();
   const [input, setInput] = useState("");
   const [composing, setComposing] = useState(false);
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showConvPanel, setShowConvPanel] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionAnchor, setMentionAnchor] = useState<DOMRect | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
-  const target = state.activeChatTarget;
-  const isConnected = state.connectionStatus === "connected";
+  const target = sessionState.activeChatTarget;
+  const isConnected = gatewayState.connectionStatus === "connected";
   const userProfile = loadUserProfile();
 
   // Auto-open sessions panel when an Agent is selected
@@ -191,19 +200,20 @@ export function ChatArea() {
 
   // Get chat target info
   const targetAgent = target?.type === "agent"
-    ? state.agents.find((a) => a.id === target.id)
+    ? agentState.agents.find((a) => a.id === target.id)
     : null;
   const targetTeam = target?.type === "team"
-    ? state.teams.find((t) => t.id === target.id)
+    ? agentState.teams.find((t) => t.id === target.id)
     : null;
   const teamAgents = targetTeam
-    ? state.agents.filter((a) => targetTeam.agentIds.includes(a.id))
+    ? agentState.agents.filter((a) => targetTeam.agentIds.includes(a.id))
     : [];
+  const tlAgentId = targetTeam ? resolveTlAgentId(targetTeam) : null;
 
   // Streaming entries for current chat target
-  const streamingEntries = Object.entries(state.streamingStates).filter(
+  const streamingEntries = Object.entries(chatState.streamingStates).filter(
     ([, s]) => target && s.targetType === target.type && s.targetId === target.id && s.isStreaming
-      && (!s.conversationId || s.conversationId === state.activeConversationId)
+      && (!s.conversationId || s.conversationId === sessionState.activeConversationId)
   );
 
   // Auto-scroll only when user is near the bottom
@@ -212,20 +222,20 @@ export function ChatArea() {
     if (isNearBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [state.messages, streamingEntries]);
+  }, [sessionState.messages, streamingEntries]);
 
   // Scroll to bottom when entering a conversation or when messages load
-  const prevConvRef = useRef(state.activeConversationId);
+  const prevConvRef = useRef(sessionState.activeConversationId);
   useEffect(() => {
-    if (state.activeConversationId !== prevConvRef.current) {
-      prevConvRef.current = state.activeConversationId;
+    if (sessionState.activeConversationId !== prevConvRef.current) {
+      prevConvRef.current = sessionState.activeConversationId;
       isNearBottomRef.current = true;
     }
-  }, [state.activeConversationId]);
+  }, [sessionState.activeConversationId]);
 
   // After messages change and we just switched conversations, scroll to bottom
   useEffect(() => {
-    if (isNearBottomRef.current && state.messages.length > 0) {
+    if (isNearBottomRef.current && sessionState.messages.length > 0) {
       // Use requestAnimationFrame to wait for DOM render
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -233,7 +243,7 @@ export function ChatArea() {
         });
       });
     }
-  }, [state.activeConversationId, state.messages.length]);
+  }, [sessionState.activeConversationId, sessionState.messages.length]);
 
   // Auto-focus
   useEffect(() => {
@@ -339,6 +349,43 @@ export function ChatArea() {
     [handleSend, composing]
   );
 
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    const pos = e.target.selectionStart ?? 0;
+    const before = e.target.value.slice(0, pos);
+    const match = before.match(/@([\w-]*)$/);
+    if (match && target?.type === "team") {
+      setMentionQuery(match[1]);
+      const rect = e.target.getBoundingClientRect();
+      setMentionAnchor(rect);
+    } else {
+      setMentionQuery(null);
+      setMentionAnchor(null);
+    }
+  }
+
+  const closeMention = useCallback(() => {
+    setMentionQuery(null);
+    setMentionAnchor(null);
+  }, []);
+
+  function insertMention(agent: Agent) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const pos = textarea.selectionStart ?? 0;
+    const before = input.slice(0, pos).replace(/@([\w-]*)$/, "");
+    const after = input.slice(pos);
+    const inserted = `@[${agent.name}](${agent.id}) `;
+    setInput(before + inserted + after);
+    setMentionQuery(null);
+    setMentionAnchor(null);
+    requestAnimationFrame(() => {
+      const newPos = (before + inserted).length;
+      textarea.setSelectionRange(newPos, newPos);
+      textarea.focus();
+    });
+  }
+
   // No target selected — empty state
   if (!target) {
     return (
@@ -356,7 +403,7 @@ export function ChatArea() {
   }
 
   const chatTitle = target.type === "agent"
-    ? (state.agentIdentities[target.id]?.name || targetAgent?.name || "Agent")
+    ? (agentState.agentIdentities[target.id]?.name || targetAgent?.name || "Agent")
     : (targetTeam?.name || "Team");
 
   const chatSubtitle = undefined;
@@ -379,7 +426,7 @@ export function ChatArea() {
             <span className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-base shrink-0">{targetAgent?.avatar}</span>
           ) : (
             <img
-              src={targetAgent?.avatar || getAgentAvatarUrl(target.id)}
+              src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id)}
               alt={chatTitle}
               className="h-7 w-7 rounded-full bg-muted object-cover shrink-0"
             />
@@ -401,21 +448,28 @@ export function ChatArea() {
         {target.type === "team" && teamAgents.length > 0 && (
           <div className="ml-auto flex items-center -space-x-2">
             {teamAgents.slice(0, 3).map((agent) => {
-              const identity = state.agentIdentities[agent.id];
-              return isEmojiAvatar(agent.avatar) ? (
-                <span
-                  key={agent.id}
-                  className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs"
-                  title={identity?.name || agent.name}
-                >{agent.avatar}</span>
-              ) : (
-                <img
-                  key={agent.id}
-                  src={agent.avatar || getAgentAvatarUrl(agent.id)}
-                  alt={agent.name}
-                  className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
-                  title={identity?.name || agent.name}
-                />
+              const identity = agentState.agentIdentities[agent.id];
+              const isTl = agent.id === tlAgentId;
+              return (
+                <div key={agent.id} className="relative" title={isTl ? "Team Leader" : (identity?.name || agent.name)}>
+                  {isEmojiAvatar(agent.avatar) ? (
+                    <span
+                      className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs"
+                    >{agent.avatar}</span>
+                  ) : (
+                    <img
+                      src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                      alt={agent.name}
+                      className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
+                    />
+                  )}
+                  {isTl && (
+                    <Crown
+                      className="absolute -top-1 -right-1 h-3 w-3 text-amber-500 fill-amber-500"
+                      aria-label="Team Leader"
+                    />
+                  )}
+                </div>
               );
             })}
             {teamAgents.length > 3 && (
@@ -436,21 +490,21 @@ export function ChatArea() {
 
       {/* Messages */}
       <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 px-4 py-4 space-y-4 relative">
-        {state.messages.length === 0 && streamingEntries.length === 0 && state.nativeSessionsLoading && (
+        {sessionState.messages.length === 0 && streamingEntries.length === 0 && sessionState.nativeSessionsLoading && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin mb-3" />
             <p className="text-sm">Loading messages...</p>
           </div>
         )}
 
-        {state.messages.length === 0 && streamingEntries.length === 0 && !state.nativeSessionsLoading && (
+        {sessionState.messages.length === 0 && streamingEntries.length === 0 && !sessionState.nativeSessionsLoading && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             {target.type === "agent" ? (
               isEmojiAvatar(targetAgent?.avatar) ? (
                 <span className="h-16 w-16 rounded-full bg-muted flex items-center justify-center text-3xl mb-4">{targetAgent?.avatar}</span>
               ) : (
                 <img
-                  src={targetAgent?.avatar || getAgentAvatarUrl(target.id)}
+                  src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id)}
                   alt={chatTitle}
                   className="h-16 w-16 rounded-full bg-muted object-cover mb-4"
                 />
@@ -475,12 +529,12 @@ export function ChatArea() {
           </div>
         )}
 
-        {state.messages.map((msg) => {
+        {sessionState.messages.map((msg) => {
           const agent = msg.agentId
-            ? state.agents.find((a) => a.id === msg.agentId)
+            ? agentState.agents.find((a) => a.id === msg.agentId)
             : null;
           const identity = msg.agentId
-            ? state.agentIdentities[msg.agentId]
+            ? agentState.agentIdentities[msg.agentId]
             : null;
           const isUser = msg.role === "user";
           const time = new Date(msg.createdAt).toLocaleTimeString([], {
@@ -508,7 +562,7 @@ export function ChatArea() {
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{agent?.avatar}</span>
                 ) : (
                   <img
-                    src={agent?.avatar || getAgentAvatarUrl(msg.agentId || "unknown")}
+                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(msg.agentId || "unknown")}
                     alt={agent?.name || "Agent"}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />
@@ -524,6 +578,9 @@ export function ChatArea() {
                   >
                     {isUser ? (userProfile.name || "You") : identity?.name || agent?.name || "Agent"}
                   </span>
+                  {!isUser && msg.agentId === tlAgentId && (
+                    <Crown className="inline-block h-3 w-3 text-amber-500 fill-amber-500 ml-1" />
+                  )}
                   <span className="text-[11px] text-muted-foreground">{time}</span>
                 </div>
                 {/* Tool calls */}
@@ -538,7 +595,7 @@ export function ChatArea() {
                   {isUser ? (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   ) : (
-                    <MarkdownRenderer content={msg.content} agentId={msg.agentId} />
+                    <MarkdownRenderer content={msg.content} agentId={msg.agentId} teamAgentIds={targetTeam ? new Set(targetTeam.agentIds) : undefined} />
                   )}
                 </div>
                 {msg.attachments && msg.attachments.length > 0 && (
@@ -571,8 +628,8 @@ export function ChatArea() {
                 {msg.role === "assistant" && (
                   <button
                     onClick={() => {
-                      const msgIndex = state.messages.findIndex(m => m.id === msg.id);
-                      const lastUserMsg = [...state.messages].slice(0, msgIndex).reverse().find(m => m.role === "user");
+                      const msgIndex = sessionState.messages.findIndex(m => m.id === msg.id);
+                      const lastUserMsg = [...sessionState.messages].slice(0, msgIndex).reverse().find(m => m.role === "user");
                       if (lastUserMsg) {
                         actions.sendMessage(lastUserMsg.content);
                       }
@@ -590,8 +647,8 @@ export function ChatArea() {
 
         {/* Streaming messages */}
         {streamingEntries.map(([agentId, streaming]) => {
-          const agent = state.agents.find((a) => a.id === agentId);
-          const identity = state.agentIdentities[agentId];
+          const agent = agentState.agents.find((a) => a.id === agentId);
+          const identity = agentState.agentIdentities[agentId];
 
           return (
             <div key={agentId} className="flex gap-4 py-0.5 -mx-4 px-4">
@@ -600,7 +657,7 @@ export function ChatArea() {
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{agent?.avatar}</span>
                 ) : (
                   <img
-                    src={agent?.avatar || getAgentAvatarUrl(agentId)}
+                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(agentId)}
                     alt={agent?.name || "Agent"}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />
@@ -611,6 +668,9 @@ export function ChatArea() {
                   <span className="font-semibold text-sm text-primary">
                     {identity?.name || agent?.name || "Agent"}
                   </span>
+                  {agentId === tlAgentId && (
+                    <Crown className="inline-block h-3 w-3 text-amber-500 fill-amber-500 ml-1" />
+                  )}
                   <StreamingIndicator phase={streaming.phase} />
                   <ElapsedTimer active={streaming.isStreaming} />
                 </div>
@@ -626,7 +686,7 @@ export function ChatArea() {
 
                 <div className="text-[15px] leading-relaxed text-foreground">
                   {streaming.content ? (
-                    <MarkdownRenderer content={streaming.content} agentId={agentId} />
+                    <MarkdownRenderer content={streaming.content} agentId={agentId} teamAgentIds={targetTeam ? new Set(targetTeam.agentIds) : undefined} />
                   ) : streaming.toolCalls && streaming.toolCalls.length > 0 ? null : (
                     <div className="flex items-center gap-1 py-2">
                       <span className="flex gap-[3px] items-center">
@@ -641,6 +701,28 @@ export function ChatArea() {
             </div>
           );
         })}
+
+        {target?.type === "team" && streamingEntries.length > 0 && (
+          <div className="mx-auto mb-2 max-w-3xl px-4 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
+              Dispatching to {streamingEntries.map(([id]) => {
+                const a = agentState.agents.find(x => x.id === id);
+                return a?.name ?? id;
+              }).join(", ")}
+            </div>
+          </div>
+        )}
+
+        {target?.type === "team" &&
+         chatState.lastCascadeStatus &&
+         chatState.lastCascadeStatus.conversationId === sessionState.activeConversationId && (
+          <div className="mx-auto mb-2 max-w-3xl px-4">
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              {cascadeBanner(chatState.lastCascadeStatus.reason, chatState.lastCascadeStatus.hop)}
+            </div>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
 
@@ -696,7 +778,7 @@ export function ChatArea() {
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={() => setComposing(false)}
@@ -707,6 +789,15 @@ export function ChatArea() {
             className="w-full resize-none bg-transparent px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
             style={{ maxHeight: 200, minHeight: 72 }}
           />
+          {mentionQuery !== null && target?.type === "team" && (
+            <MentionAutocomplete
+              candidates={teamAgents.map(a => ({ agent: a }))}
+              query={mentionQuery}
+              onSelect={insertMention}
+              onClose={closeMention}
+              anchorRect={mentionAnchor}
+            />
+          )}
         </div>
 
         {/* Toolbar row - bottom */}
@@ -767,4 +858,10 @@ export function ChatArea() {
       )}
     </div>
   );
+}
+
+function cascadeBanner(reason: "max_hops" | "loop" | "abort", hop: number): string {
+  if (reason === "max_hops") return `⚠ Cascade stopped at hop ${hop} (max 8).`;
+  if (reason === "loop") return `⚠ Cascade loop detected. Stopped at hop ${hop}.`;
+  return `⏸ Cascade interrupted at hop ${hop}.`;
 }

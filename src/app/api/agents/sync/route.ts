@@ -48,9 +48,11 @@ export async function POST(req: NextRequest) {
             const identityResult = await conn.call("agent.identity.get", { agentId: a.id });
             if (identityResult.ok && identityResult.payload) {
               const p = identityResult.payload;
+              const identityName = p.name as string;
+              const isDefault = !identityName || identityName === "Assistant";
               return {
                 id: a.id,
-                name: (p.name as string) || a.name || a.id,
+                name: isDefault ? (a.name || a.id) : identityName,
                 avatar: (p.avatar as string) || undefined,
                 emoji: (p.emoji as string) || undefined,
               };
