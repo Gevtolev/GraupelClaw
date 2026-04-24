@@ -20,6 +20,7 @@ const specialties: { value: AgentSpecialty; label: string; desc: string }[] = [
   { value: "research", label: "Research", desc: "Analyst & researcher" },
   { value: "writing", label: "Writing", desc: "Content creator" },
   { value: "design", label: "Design", desc: "UI/UX designer" },
+  { value: "product", label: "Product Manager", desc: "Requirements & product lifecycle" },
 ];
 
 export function CreateAgentDialog({

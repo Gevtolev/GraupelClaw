@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -27,13 +27,12 @@ export function CreateTeamDialog({
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [tlAgentId, setTlAgentId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (tlAgentId && !selectedAgentIds.includes(tlAgentId)) {
-      setTlAgentId(selectedAgentIds[0] ?? null);
-    } else if (!tlAgentId && selectedAgentIds.length > 0) {
-      setTlAgentId(selectedAgentIds[0]);
-    }
-  }, [selectedAgentIds, tlAgentId]);
+  // Derive the effective TL without an effect — invalid or unset tlAgentId falls
+  // back to the first selected member. This avoids a setState-in-effect cascade.
+  const effectiveTlAgentId =
+    tlAgentId && selectedAgentIds.includes(tlAgentId)
+      ? tlAgentId
+      : (selectedAgentIds[0] ?? null);
 
   const companyAgents = state.agents.filter((a) => a.companyId === state.activeCompanyId);
 
@@ -50,7 +49,7 @@ export function CreateTeamDialog({
       name: name.trim(),
       description: description.trim() || undefined,
       agentIds: selectedAgentIds,
-      tlAgentId: tlAgentId ?? undefined,
+      tlAgentId: effectiveTlAgentId ?? undefined,
     });
     setName("");
     setDescription("");
@@ -124,7 +123,7 @@ export function CreateTeamDialog({
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Team Leader</label>
               <select
-                value={tlAgentId ?? ""}
+                value={effectiveTlAgentId ?? ""}
                 onChange={(e) => setTlAgentId(e.target.value)}
                 className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm"
               >

@@ -83,7 +83,7 @@ export interface Company {
   updatedAt: number;
 }
 
-export type AgentSpecialty = "coding" | "research" | "writing" | "design" | "general";
+export type AgentSpecialty = "coding" | "research" | "writing" | "design" | "product" | "general";
 
 export interface Agent {
   id: string;

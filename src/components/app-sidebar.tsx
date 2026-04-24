@@ -10,7 +10,7 @@ import { useAppConfig } from "@/hooks/use-app-config";
 import { useStore } from "@/lib/store";
 import { projectBrand } from "@/lib/project-brand";
 import { cn } from "@/lib/utils";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupAction,
   SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton,
@@ -196,7 +196,7 @@ export function AppSidebar() {
                           <span className="h-5 w-5 flex items-center justify-center text-sm">{agent.avatar}</span>
                         ) : (
                           <img
-                            src={agent.avatar || getAgentAvatarUrl(agent.id)}
+                            src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
                             alt={agent.name}
                             className="h-5 w-5 rounded-full object-cover"
                           />

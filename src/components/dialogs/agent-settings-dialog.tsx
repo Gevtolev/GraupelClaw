@@ -31,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { projectBrand } from "@/lib/project-brand";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/types";
@@ -215,7 +215,7 @@ export function AgentSettingsDialog({
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{avatar}</span>
                 ) : (
                   <img
-                    src={avatar || getAgentAvatarUrl(agent.id)}
+                    src={isImageAvatar(avatar) ? avatar : getAgentAvatarUrl(agent.id)}
                     alt={agent.name}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />

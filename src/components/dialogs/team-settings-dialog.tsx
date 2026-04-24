@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useStore } from "@/lib/store";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import {
   Users, UserPlus, Wrench, Trash2, ChevronRight, Check, X, Crown,
@@ -269,7 +269,7 @@ export function TeamSettingsDialog({
                               <span className="h-6 w-6 flex items-center justify-center text-sm">{agent.avatar}</span>
                             ) : (
                               <img
-                                src={agent.avatar || getAgentAvatarUrl(agent.id)}
+                                src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
                                 alt={agent.name}
                                 className="h-6 w-6 rounded-full bg-muted object-cover"
                               />

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import type { Agent } from "@/types";
 import { cn } from "@/lib/utils";
-import { getAgentAvatarUrl, isEmojiAvatar } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 
 export interface MentionCandidate {
   agent: Agent;
@@ -56,7 +56,7 @@ export function MentionAutocomplete({ candidates, query, onSelect, onClose, anch
                 <span className="h-5 w-5 flex items-center justify-center text-sm">{c.agent.avatar}</span>
               ) : (
                 <img
-                  src={c.agent.avatar || getAgentAvatarUrl(c.agent.id)}
+                  src={isImageAvatar(c.agent.avatar) ? c.agent.avatar : getAgentAvatarUrl(c.agent.id)}
                   alt={c.agent.name}
                   className="h-5 w-5 rounded-full bg-muted object-cover"
                 />

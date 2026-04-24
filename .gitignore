@@ -46,3 +46,10 @@ REQUIREMENTS.md
 
 # SQLite data directory
 /data
+
+# Playwright
+/.playwright/
+/.playwright-mcp/
+
+# Accio
+.accio/
