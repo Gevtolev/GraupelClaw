@@ -5,12 +5,20 @@ Only record patterns that are easier to forget than to rediscover.
 
 ---
 
-## 全局状态集中在 store.tsx
+## 状态按领域切分为 slice + 跨切 coordinator
 
 **When**: 添加任何新功能、修改业务逻辑、添加新的 UI 状态
-**How**: 在 store.tsx 中：1) 在 Action 联合类型中添加新 action type，2) 在 reducer 中添加 case，3) 创建 action 函数，4) 在 actions 对象中导出。所有副作用（API 调用、DB 操作）都在 action 函数中完成，不在组件中。
-**Why not the obvious alternative**: Not recorded
-**Detected from**: c01018bcf790ac4ad5a4bded69b09a1a1ff7d200
+**How**:
+1. 判断字段归属：gateway (companies / connection) / agent (agents, teams) / session (conversations, messages, activeChatTarget) / chat (streamingStates, cascade)
+2. 若为 slice 内部 CRUD（只动自己切片的 state + 自己关心的 db）：
+   - 在 `src/lib/store/{slice}/types.ts` 增补 action 类型
+   - 在 `reducer.ts` 加 case + 写单元测试
+   - 在 `store.tsx` 的 Provider value 中暴露 action creator
+3. 若为跨切动作：在 `src/lib/store/coordinators/` 新建 pure function，显式接收 `getXState / dispatchX / refs`，配单元测试；在 `actions-provider.tsx` 中用 `useCallback` 绑定并加入 `useActions()`
+4. 消费者：`useGatewayStore()` / `useAgentStore()` / `useSessionStore()` / `useChatStore()` 拿 state + 切片 CRUD；`useActions()` 拿跨切动作
+5. **铁律**：slice Provider 内 useEffect 只订阅自己切片的 state，绝不跨切订阅；跨切反应放 `<ActionsProvider>` 的 useEffect
+**Why not the obvious alternative**: 单一 useStore() facade 使 streaming delta 触发全量 re-render；切片 Provider 跨切订阅会产生隐式反应链难追踪
+**Detected from**: 7552c28
 
 ---
 

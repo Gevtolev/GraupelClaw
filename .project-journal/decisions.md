@@ -42,3 +42,13 @@ Append new entries at the bottom.
 **Rejected**: 维持现状（持续膨胀，新功能继续往单文件堆）；仅抽出同步保护逻辑（治标不治本，god object 仍在）；迁移到 Zustand/Redux（引入新依赖与心智负担，收益不抵成本）。
 **Affects**: src/lib/store.tsx 及所有 useStore 调用方；patterns.md 中旧的「全局状态集中在 store.tsx」条目将被新 pattern 取代（待第一个 slice 落地后再记录 pattern）。
 **Detected from**: 5e806a976fbc1f7bf03396fb8aeb86767c3dab9f
+
+---
+
+## [2026-04-24] store 按领域拆分落地
+
+**Context**: 2026-04-24 决定把 store.tsx 拆为 gateway / agent / session / chat 四 slice + coordinators，本次 PR 完成落地。
+**Decision**: 14 commit 单 PR 完成：reducer 先于 Provider、Provider 先于 coordinator、消费者迁移独立一个 commit、legacy 删除独立一个 commit。测试硬门槛 + spec §12 手工 QA 通过后 merge。
+**Rejected**: 分多 PR 滚动迁移（双轨期过长易落债务）；保留 `useStore()` facade（re-render 隔离收益归零）。
+**Affects**: src/lib/store/ 新目录 + src/lib/team/types.ts 的 DispatchOpts.getState 窄化；9 个消费者 API 切换；types/index.ts 删除 AppState。
+**Detected from**: 7552c28

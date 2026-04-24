@@ -9,7 +9,8 @@
 
 ## 关键架构决策
 
-- `store.tsx` 正按领域拆分为 `agentStore` / `sessionStore` / `chatStore` / `gatewayStore`；**新功能加入对应 slice，不要继续往单一 store 堆**（拆分进行中，未完成的领域暂留在 store.tsx）
+- `store.tsx` 已按领域拆分为 `store/gateway` / `store/agent` / `store/session` / `store/chat` 四个 slice + `store/coordinators/`。**切片 Provider 内 useEffect 只订阅自己切片**；跨切反应放 `<ActionsProvider>` 的 useEffect
+- 消费者按需用 `useGatewayStore/useAgentStore/useSessionStore/useChatStore` + `useActions()`，不要再从旧的 `useStore()` 引入
 - 客户端不直连网关 WebSocket，所有通信经过 Next.js API route 代理
 - `source: "native-session"` 区分本地对话和网关原生 Session，决定是否本地持久化
 - `customName: true` 保护用户手动重命名的 Agent 不被网关同步覆盖
