@@ -1164,6 +1164,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         buildSessionKey: teamSessionKey,
         maxHops: 8,
       });
+      teamAbortedRef.current.delete(conversationId);
     }
   }, [createConversationAction, fetchNativeAgentSessions]);
 
@@ -1173,7 +1174,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!streaming) return;
 
     // Signal the team cascade owning this streaming session to stop.
-    if (streaming.conversationId) {
+    if (streaming.targetType === "team" && streaming.conversationId) {
       teamAbortedRef.current.set(streaming.conversationId, true);
     }
 
