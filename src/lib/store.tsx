@@ -1140,7 +1140,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               m.agentId === agentId &&
               m.targetId === target.id &&
               m.conversationId === conversationId &&
-              m.createdAt >= sinceTs,
+              m.createdAt > sinceTs,
           );
         if (!reply) return null;
         return { fromAgentId: agentId, content: reply.content };

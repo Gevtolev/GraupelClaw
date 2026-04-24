@@ -1,3 +1,5 @@
+import type { AgentTeam, MessageAttachment, AppState } from "@/types";
+
 export interface Mention {
   name: string;
   agentId: string;
@@ -9,8 +11,6 @@ export interface RosterEntry {
   description?: string;
   role: "TL" | "Member";
 }
-
-import type { AgentTeam, MessageAttachment, AppState } from "@/types";
 
 export interface CascadeContext {
   teamId: string;
