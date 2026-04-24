@@ -33,6 +33,7 @@ import {
 import { parseNativeSessionConversations, parseNativeSessionMessages } from "@/lib/openclaw-sessions";
 import { projectBrand } from "@/lib/project-brand";
 import { gatewayRpc, RuntimeClient } from "@/lib/runtime";
+import { dispatchTeamMessage } from "@/lib/team";
 import type {
   Company,
   Agent,
@@ -95,7 +96,9 @@ type Action =
   | { type: "SET_STREAMING_CONTENT"; agentId: string; content: string; runId: string | null; phase?: StreamingPhase; toolCalls?: ToolCallContent[] }
   | { type: "CLEAR_STREAMING"; agentId: string }
   | { type: "SET_NATIVE_SESSIONS_LOADING"; loading: boolean }
-  | { type: "SET_NATIVE_SESSIONS_ERROR"; error: string | null };
+  | { type: "SET_NATIVE_SESSIONS_ERROR"; error: string | null }
+  | { type: "SET_CASCADE_STATUS"; status: { conversationId: string; reason: "max_hops" | "loop" | "abort"; hop: number } }
+  | { type: "CLEAR_CASCADE_STATUS"; conversationId: string };
 
 // ── Initial State ───────────────────────────────────────────────────
 
@@ -269,6 +272,15 @@ function reducer(state: AppState, action: Action): AppState {
     case "SET_NATIVE_SESSIONS_ERROR":
       return { ...state, nativeSessionsError: action.error };
 
+    case "SET_CASCADE_STATUS":
+      return { ...state, lastCascadeStatus: action.status };
+
+    case "CLEAR_CASCADE_STATUS":
+      if (state.lastCascadeStatus?.conversationId === action.conversationId) {
+        return { ...state, lastCascadeStatus: null };
+      }
+      return state;
+
     default:
       return state;
   }
@@ -325,7 +337,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   stateRef.current = state;
   const gatewayRef = useRef<RuntimeClient | null>(null);
   const pendingStreamResolvers = useRef<Map<string, () => void>>(new Map());
-  const teamAbortedRef = useRef(false);
+  const teamAbortedRef = useRef<Map<string, boolean>>(new Map());
 
   // ── Resolve agentId from sessionKey ───────────────────────────
 
@@ -1066,26 +1078,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const team = current.teams.find((t) => t.id === target.id);
       if (!team) return;
 
-      const STREAM_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+      teamAbortedRef.current.set(conversationId, false);
+      dispatch({ type: "CLEAR_CASCADE_STATUS", conversationId });
 
-      // Build full team conversation history from existing messages
-      const teamHistory = current.messages
-        .filter(m => m.targetType === "team" && m.targetId === target.id)
-        .map(m => {
-          if (m.role === "user") return `[User]: ${m.content}`;
-          const agent = current.agents.find(a => a.id === m.agentId);
-          return `[${agent?.name || m.agentId || "Assistant"}]: ${m.content}`;
-        })
-        .join("\n\n");
+      // userMsg was already inserted at lines 1032-1045 before this branch ran.
+      const userMsgId = userMsg.id;
 
-      let currentRoundReplies: Array<{ agentName: string; content: string }> = [];
-      teamAbortedRef.current = false;
+      const STREAM_TIMEOUT = 5 * 60 * 1000;
 
-      for (const agentId of team.agentIds) {
-        // Check if team chat was aborted
-        if (teamAbortedRef.current) break;
-
-        const sessionKey = teamSessionKey(agentId, target.id, conversationId);
+      const sendToAgent = async (
+        agentId: string,
+        sessionKey: string,
+        text: string,
+        atts?: typeof attachments,
+      ): Promise<{ fromAgentId: string; content: string } | null> => {
         dispatch({
           type: "SET_STREAMING",
           agentId,
@@ -1095,55 +1101,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           sessionKey,
           isStreaming: true,
         });
-        try {
-          // Build full context: history + current round replies + new message
-          let messageToSend = content;
-          const contextParts: string[] = [];
-
-          if (teamHistory) {
-            contextParts.push(`[Team conversation history]\n${teamHistory}`);
-          }
-
-          if (currentRoundReplies.length > 0) {
-            const roundContext = currentRoundReplies
-              .map(r => `[${r.agentName}]: ${r.content}`)
-              .join("\n\n");
-            contextParts.push(`[Current round replies]\n${roundContext}`);
-          }
-
-          if (contextParts.length > 0) {
-            messageToSend = `${contextParts.join("\n\n")}\n\n[New user message]\n${content}`;
-          }
-
-          // Set up resolver BEFORE sending so the final event can resolve it
-          const streamDone = Promise.race([
-            new Promise<void>((resolve) => {
-              pendingStreamResolvers.current.set(agentId, resolve);
-            }),
-            new Promise<void>((resolve) => setTimeout(() => {
+        const streamDone = Promise.race([
+          new Promise<void>((resolve) => {
+            pendingStreamResolvers.current.set(agentId, resolve);
+          }),
+          new Promise<void>((resolve) =>
+            setTimeout(() => {
               pendingStreamResolvers.current.delete(agentId);
               resolve();
-            }, STREAM_TIMEOUT)),
-          ]);
-
-          await client.sendMessage(sessionKey, messageToSend, undefined, attachments);
-
-          // Wait for streaming to complete (final/error/aborted event)
+            }, STREAM_TIMEOUT),
+          ),
+        ]);
+        const sinceTs = Date.now();
+        try {
+          await client.sendMessage(sessionKey, text, undefined, atts);
           await streamDone;
-
-          // Collect this agent's reply for the next agent's context in this round
-          const latestState = stateRef.current;
-          const agentReply = [...latestState.messages].reverse().find(
-            (m) => m.role === "assistant" && m.agentId === agentId && m.targetId === target.id
-          );
-          if (agentReply) {
-            const agent = latestState.agents.find((a) => a.id === agentId);
-            currentRoundReplies.push({ agentName: agent?.name || agentId, content: agentReply.content });
-          }
         } catch {
-          dispatch({ type: "SET_STREAMING", agentId, targetType: "team", targetId: target.id, sessionKey, isStreaming: false });
+          dispatch({
+            type: "SET_STREAMING",
+            agentId,
+            targetType: "team",
+            targetId: target.id,
+            sessionKey,
+            isStreaming: false,
+          });
+          return null;
         }
-      }
+
+        // Pick the reply by agentId + conversationId + timestamp > sinceTs
+        // so repeat dispatches in the same cascade don't pick up stale replies.
+        const latest = stateRef.current;
+        const reply = [...latest.messages]
+          .reverse()
+          .find(
+            (m) =>
+              m.role === "assistant" &&
+              m.agentId === agentId &&
+              m.targetId === target.id &&
+              m.conversationId === conversationId &&
+              m.createdAt >= sinceTs,
+          );
+        if (!reply) return null;
+        return { fromAgentId: agentId, content: reply.content };
+      };
+
+      await dispatchTeamMessage({
+        team,
+        conversationId,
+        rootUserMessageId: userMsgId,
+        userContent: content,
+        attachments,
+        getState: () => stateRef.current,
+        sendToAgent,
+        isAborted: (cid) => teamAbortedRef.current.get(cid) === true,
+        onCascadeStopped: ({ reason, hop }) => {
+          dispatch({
+            type: "SET_CASCADE_STATUS",
+            status: { conversationId, reason, hop },
+          });
+        },
+        buildSessionKey: teamSessionKey,
+        maxHops: 8,
+      });
     }
   }, [createConversationAction, fetchNativeAgentSessions]);
 
@@ -1152,8 +1171,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const streaming = current.streamingStates[agentId];
     if (!streaming) return;
 
-    // Signal team loop to stop
-    teamAbortedRef.current = true;
+    // Signal the team cascade owning this streaming session to stop.
+    if (streaming.conversationId) {
+      teamAbortedRef.current.set(streaming.conversationId, true);
+    }
 
     const client = gatewayRef.current;
     if (client) {
