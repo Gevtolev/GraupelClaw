@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { testConnection } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";

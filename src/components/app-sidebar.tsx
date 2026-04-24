@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { useAppConfig } from "@/hooks/use-app-config";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { projectBrand } from "@/lib/project-brand";
 import { cn } from "@/lib/utils";
 import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";

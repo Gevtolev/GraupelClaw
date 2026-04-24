@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { Loader2 } from "lucide-react";
 import type { AgentSpecialty } from "@/types";
 

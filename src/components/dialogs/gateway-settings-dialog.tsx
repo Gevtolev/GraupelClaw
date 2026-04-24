@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { useAppConfig } from "@/hooks/use-app-config";
 import { testConnection, gatewayRpc } from "@/lib/runtime";
 import { cn } from "@/lib/utils";

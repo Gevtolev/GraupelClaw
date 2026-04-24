@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { cn } from "@/lib/utils";
 import { MessageCircle, Plus, Trash2, Pencil, Check, X as XIcon, Loader2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";

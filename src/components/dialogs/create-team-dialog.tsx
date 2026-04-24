@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { getAgentAvatarUrl } from "@/lib/avatar";
 import { Check } from "lucide-react";
 

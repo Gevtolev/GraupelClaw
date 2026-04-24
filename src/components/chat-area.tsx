@@ -19,7 +19,7 @@ import {
   Clock,
   Crown,
 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useStore } from "@/lib/store-legacy";
 import { resolveTlAgentId } from "@/lib/team";
 import { projectBrand } from "@/lib/project-brand";
 import { MarkdownRenderer } from "@/components/markdown-renderer";

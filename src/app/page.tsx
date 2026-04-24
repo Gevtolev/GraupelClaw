@@ -1,6 +1,6 @@
 "use client";
 
-import { StoreProvider } from "@/lib/store";
+import { StoreProvider } from "@/lib/store-legacy";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ChatArea } from "@/components/chat-area";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
