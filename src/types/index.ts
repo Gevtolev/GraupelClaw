@@ -2,7 +2,7 @@
 
 export type StreamingPhase = "connecting" | "thinking" | "tool-calling" | "responding";
 
-export type ChatState = "delta" | "message_done" | "final" | "error" | "aborted";
+export type ChatEventState = "delta" | "message_done" | "final" | "error" | "aborted";
 
 export interface ChatMessageTextContent {
   type: "text";
@@ -29,7 +29,7 @@ export interface ChatMessage {
 export interface ChatEventPayload {
   runId: string;
   sessionKey: string;
-  state: ChatState;
+  state: ChatEventState;
   message: ChatMessage;
   error?: string;
   toolCalls?: ToolCallContent[];
