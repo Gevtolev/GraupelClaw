@@ -1,4 +1,4 @@
-import type { ChatEventPayload, Conversation, Message } from "@/types";
+import type { ChatEventPayload, Message } from "@/types";
 import type { ChatSliceState, ChatAction } from "@/lib/store/chat/types";
 import type { SessionState, SessionAction } from "@/lib/store/session/types";
 

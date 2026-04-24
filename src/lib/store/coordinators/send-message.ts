@@ -219,12 +219,15 @@ async function sendToTeam(
     rootUserMessageId: userMsgId,
     userContent: content,
     attachments,
-    getState: () => ({
-      agents: agentState.agents,
-      teams: agentState.teams,
-      messages: deps.getSessionState().messages,
-      agentIdentities: agentState.agentIdentities,
-    }),
+    getState: () => {
+      const latestAgent = deps.getAgentState();
+      return {
+        agents: latestAgent.agents,
+        teams: latestAgent.teams,
+        messages: deps.getSessionState().messages,
+        agentIdentities: latestAgent.agentIdentities,
+      };
+    },
     sendToAgent: sendToAgentFn,
     isAborted: cid => deps.teamAbortedRef.current.get(cid) === true,
     onCascadeStopped: ({ reason, hop }) => {

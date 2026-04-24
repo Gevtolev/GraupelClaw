@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ChatEventPayload, Conversation, Message } from "@/types";
+import type { ChatEventPayload, Conversation } from "@/types";
 import type { StreamingState } from "@/lib/store/chat/types";
 import { handleGatewayChatEvent } from "./gateway-events";
 
