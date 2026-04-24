@@ -360,6 +360,11 @@ export function ChatArea() {
     }
   }
 
+  const closeMention = useCallback(() => {
+    setMentionQuery(null);
+    setMentionAnchor(null);
+  }, []);
+
   function insertMention(agent: Agent) {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -785,7 +790,7 @@ export function ChatArea() {
               candidates={teamAgents.map(a => ({ agent: a }))}
               query={mentionQuery}
               onSelect={insertMention}
-              onClose={() => { setMentionQuery(null); setMentionAnchor(null); }}
+              onClose={closeMention}
               anchorRect={mentionAnchor}
             />
           )}
