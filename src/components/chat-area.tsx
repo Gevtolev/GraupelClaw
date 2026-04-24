@@ -17,8 +17,10 @@ import {
   X,
   File as FileIcon,
   Clock,
+  Crown,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
+import { resolveTlAgentId } from "@/lib/team";
 import { projectBrand } from "@/lib/project-brand";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { cn } from "@/lib/utils";
@@ -199,6 +201,7 @@ export function ChatArea() {
   const teamAgents = targetTeam
     ? state.agents.filter((a) => targetTeam.agentIds.includes(a.id))
     : [];
+  const tlAgentId = targetTeam ? resolveTlAgentId(targetTeam) : null;
 
   // Streaming entries for current chat target
   const streamingEntries = Object.entries(state.streamingStates).filter(
@@ -402,20 +405,27 @@ export function ChatArea() {
           <div className="ml-auto flex items-center -space-x-2">
             {teamAgents.slice(0, 3).map((agent) => {
               const identity = state.agentIdentities[agent.id];
-              return isEmojiAvatar(agent.avatar) ? (
-                <span
-                  key={agent.id}
-                  className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs"
-                  title={identity?.name || agent.name}
-                >{agent.avatar}</span>
-              ) : (
-                <img
-                  key={agent.id}
-                  src={agent.avatar || getAgentAvatarUrl(agent.id)}
-                  alt={agent.name}
-                  className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
-                  title={identity?.name || agent.name}
-                />
+              const isTl = agent.id === tlAgentId;
+              return (
+                <div key={agent.id} className="relative" title={isTl ? "Team Leader" : (identity?.name || agent.name)}>
+                  {isEmojiAvatar(agent.avatar) ? (
+                    <span
+                      className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs"
+                    >{agent.avatar}</span>
+                  ) : (
+                    <img
+                      src={agent.avatar || getAgentAvatarUrl(agent.id)}
+                      alt={agent.name}
+                      className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
+                    />
+                  )}
+                  {isTl && (
+                    <Crown
+                      className="absolute -top-1 -right-1 h-3 w-3 text-amber-500 fill-amber-500"
+                      aria-label="Team Leader"
+                    />
+                  )}
+                </div>
               );
             })}
             {teamAgents.length > 3 && (
@@ -524,6 +534,9 @@ export function ChatArea() {
                   >
                     {isUser ? (userProfile.name || "You") : identity?.name || agent?.name || "Agent"}
                   </span>
+                  {!isUser && msg.agentId === tlAgentId && (
+                    <Crown className="inline-block h-3 w-3 text-amber-500 fill-amber-500 ml-1" />
+                  )}
                   <span className="text-[11px] text-muted-foreground">{time}</span>
                 </div>
                 {/* Tool calls */}
@@ -611,6 +624,9 @@ export function ChatArea() {
                   <span className="font-semibold text-sm text-primary">
                     {identity?.name || agent?.name || "Agent"}
                   </span>
+                  {agentId === tlAgentId && (
+                    <Crown className="inline-block h-3 w-3 text-amber-500 fill-amber-500 ml-1" />
+                  )}
                   <StreamingIndicator phase={streaming.phase} />
                   <ElapsedTimer active={streaming.isStreaming} />
                 </div>
@@ -641,6 +657,28 @@ export function ChatArea() {
             </div>
           );
         })}
+
+        {target?.type === "team" && streamingEntries.length > 0 && (
+          <div className="mx-auto mb-2 max-w-3xl px-4 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
+              Dispatching to {streamingEntries.map(([id]) => {
+                const a = state.agents.find(x => x.id === id);
+                return a?.name ?? id;
+              }).join(", ")}
+            </div>
+          </div>
+        )}
+
+        {target?.type === "team" &&
+         state.lastCascadeStatus &&
+         state.lastCascadeStatus.conversationId === state.activeConversationId && (
+          <div className="mx-auto mb-2 max-w-3xl px-4">
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              {cascadeBanner(state.lastCascadeStatus.reason, state.lastCascadeStatus.hop)}
+            </div>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
 
@@ -767,4 +805,10 @@ export function ChatArea() {
       )}
     </div>
   );
+}
+
+function cascadeBanner(reason: "max_hops" | "loop" | "abort", hop: number): string {
+  if (reason === "max_hops") return `⚠ Cascade stopped at hop ${hop} (max 8).`;
+  if (reason === "loop") return `⚠ Cascade loop detected. Stopped at hop ${hop}.`;
+  return `⏸ Cascade interrupted at hop ${hop}.`;
 }
