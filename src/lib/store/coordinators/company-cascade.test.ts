@@ -85,4 +85,35 @@ describe("deleteCompany coordinator", () => {
     await deleteCompany("c1", deps);
     expect(deps.dispatchSession).toHaveBeenCalledWith({ type: "RESET_SESSION_ON_COMPANY_CHANGE" });
   });
+
+  it("reloads agents/teams for the fallback active company after deleting the active one", async () => {
+    // The coordinator computes the fallback from the pre-dispatch snapshot,
+    // mirroring the reducer's REMOVE_COMPANY behaviour (first remaining company).
+    const deps = makeDeps("c1", [company("c1"), company("c2")]);
+    deps.getAgentsByCompany = vi.fn(async () => [
+      { id: "a2", companyId: "c2", name: "Y", description: "", specialty: "general", createdAt: 0 } as Agent,
+    ]);
+    deps.getTeamsByCompany = vi.fn(async () => []);
+
+    await deleteCompany("c1", deps);
+
+    expect(deps.getAgentsByCompany).toHaveBeenCalledWith("c2");
+    expect(deps.getTeamsByCompany).toHaveBeenCalledWith("c2");
+    expect(deps.dispatchAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SET_AGENTS" }),
+    );
+    expect(deps.dispatchAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SET_TEAMS" }),
+    );
+  });
+
+  it("does NOT reload agents when no companies remain after deletion", async () => {
+    // Single-company deletion: no fallback possible.
+    const deps = makeDeps("c1", [company("c1")]);
+
+    await deleteCompany("c1", deps);
+
+    expect(deps.getAgentsByCompany).not.toHaveBeenCalled();
+    expect(deps.getTeamsByCompany).not.toHaveBeenCalled();
+  });
 });
