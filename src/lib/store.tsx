@@ -303,7 +303,7 @@ interface StoreActions {
   updateAgent: (id: string, updates: Partial<Agent>) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
 
-  createTeam: (opts: { companyId: string; name: string; description?: string; agentIds: string[] }) => Promise<AgentTeam>;
+  createTeam: (opts: { companyId: string; name: string; description?: string; agentIds: string[]; tlAgentId?: string }) => Promise<AgentTeam>;
   updateTeam: (id: string, updates: Partial<AgentTeam>) => Promise<void>;
   deleteTeam: (id: string) => Promise<void>;
 
@@ -823,13 +823,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.agents, state.companies]);
 
-  const createTeamAction = useCallback(async (opts: { companyId: string; name: string; description?: string; agentIds: string[] }) => {
+  const createTeamAction = useCallback(async (opts: { companyId: string; name: string; description?: string; agentIds: string[]; tlAgentId?: string }) => {
     const team: AgentTeam = {
       id: uuidv4(),
       companyId: opts.companyId,
       name: opts.name,
       description: opts.description,
       agentIds: opts.agentIds,
+      tlAgentId: opts.tlAgentId,
       createdAt: Date.now(),
     };
     await dbCreateTeam(team);

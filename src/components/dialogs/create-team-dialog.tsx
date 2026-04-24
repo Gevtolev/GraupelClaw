@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,15 @@ export function CreateTeamDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  const [tlAgentId, setTlAgentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tlAgentId && !selectedAgentIds.includes(tlAgentId)) {
+      setTlAgentId(selectedAgentIds[0] ?? null);
+    } else if (!tlAgentId && selectedAgentIds.length > 0) {
+      setTlAgentId(selectedAgentIds[0]);
+    }
+  }, [selectedAgentIds, tlAgentId]);
 
   const companyAgents = state.agents.filter((a) => a.companyId === state.activeCompanyId);
 
@@ -41,10 +50,12 @@ export function CreateTeamDialog({
       name: name.trim(),
       description: description.trim() || undefined,
       agentIds: selectedAgentIds,
+      tlAgentId: tlAgentId ?? undefined,
     });
     setName("");
     setDescription("");
     setSelectedAgentIds([]);
+    setTlAgentId(null);
     onOpenChange(false);
   }
 
@@ -108,6 +119,28 @@ export function CreateTeamDialog({
             <p className="text-sm text-muted-foreground italic">
               Add agents first before creating a team.
             </p>
+          )}
+          {selectedAgentIds.length > 0 && (
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Team Leader</label>
+              <select
+                value={tlAgentId ?? ""}
+                onChange={(e) => setTlAgentId(e.target.value)}
+                className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                {selectedAgentIds.map((id) => {
+                  const a = companyAgents.find((x) => x.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {a?.name ?? id}
+                    </option>
+                  );
+                })}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                TL coordinates the team. Non-mention user messages go to the TL first.
+              </p>
+            </div>
           )}
         </div>
         <DialogFooter>
