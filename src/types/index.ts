@@ -103,7 +103,7 @@ export interface AgentTeam {
   avatar?: string;
   description?: string;
   agentIds: string[];
-  tlAgentId?: string;
+  tlAgentId?: string | null;
   createdAt: number;
 }
 

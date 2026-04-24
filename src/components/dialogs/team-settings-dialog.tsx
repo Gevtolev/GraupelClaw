@@ -48,17 +48,26 @@ export function TeamSettingsDialog({
   const [avatar, setAvatar] = useState(team.avatar || "");
   const [description, setDescription] = useState(team.description || "");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(team.agentIds);
+  const [localTlAgentId, setLocalTlAgentId] = useState<string | undefined>(
+    team.tlAgentId ?? undefined,
+  );
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const companyAgents = state.agents.filter((a) => a.companyId === team.companyId);
-  const currentTlId = resolveTlAgentId(team);
+  const effectiveTeam: AgentTeam = {
+    ...team,
+    agentIds: selectedAgentIds,
+    tlAgentId: localTlAgentId,
+  };
+  const currentTlId = resolveTlAgentId(effectiveTeam);
 
   useEffect(() => {
     setName(team.name);
     setAvatar(team.avatar || "");
     setDescription(team.description || "");
     setSelectedAgentIds(team.agentIds);
+    setLocalTlAgentId(team.tlAgentId ?? undefined);
     setActiveSection("general");
   }, [team]);
 
@@ -83,7 +92,8 @@ export function TeamSettingsDialog({
         agentIds: next,
       };
       if (team.tlAgentId === id && !next.includes(id)) {
-        merged.tlAgentId = undefined;
+        merged.tlAgentId = null;
+        setLocalTlAgentId(undefined);
       }
       if (merged.name && next.length > 0) {
         actions.updateTeam(team.id, merged);
@@ -275,7 +285,8 @@ export function TeamSettingsDialog({
                           {selected && (
                             <button
                               onClick={() => {
-                                if (agent.id !== team.tlAgentId) {
+                                if (agent.id !== currentTlId) {
+                                  setLocalTlAgentId(agent.id);
                                   actions.updateTeam(team.id, { tlAgentId: agent.id });
                                 }
                               }}
