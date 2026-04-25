@@ -18,7 +18,10 @@ export interface CascadeContext {
   rootUserMessageId: string;
   hop: number;
   maxHops: number;
-  activatedChain: string[];
+  /** Directed dispatch edges accumulated across hops. Used by the loop
+   * detector to flag immediate back-edges (A→B then B→A) without falsely
+   * flagging parallel fan-out members as if they triggered each other. */
+  activatedEdges: { from: string; to: string }[];
 }
 
 export interface DispatchReply {

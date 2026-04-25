@@ -1,37 +1,59 @@
 import { describe, it, expect } from "vitest";
-import { isRecentLoop } from "./loop-detector";
+import { isRecentLoop, type DispatchEdge } from "./loop-detector";
 
 describe("isRecentLoop", () => {
-  it("returns false when chain is empty", () => {
+  it("returns false when no edges have been recorded", () => {
     expect(isRecentLoop([], "a", "b")).toBe(false);
   });
 
-  it("returns false when the reverse pair is not in the last 3 entries", () => {
-    expect(isRecentLoop(["x", "y", "z"], "a", "b")).toBe(false);
+  it("returns false when the reverse edge is not in the last 3 entries", () => {
+    const edges: DispatchEdge[] = [
+      { from: "x", to: "y" },
+      { from: "y", to: "z" },
+    ];
+    expect(isRecentLoop(edges, "a", "b")).toBe(false);
   });
 
-  it("returns true when adjacent pair b→a exists in last 3 entries", () => {
-    // chain ends with "b", "a"; now a wants to @ b → forms b→a→b
-    expect(isRecentLoop(["x", "b", "a"], "a", "b")).toBe(true);
+  it("returns true when the reverse edge (to→from) exists in the last 3 entries", () => {
+    // recent edges contain b→a; now a wants to dispatch b → would close the loop
+    const edges: DispatchEdge[] = [{ from: "b", to: "a" }];
+    expect(isRecentLoop(edges, "a", "b")).toBe(true);
   });
 
-  it("returns true when adjacent pair b→a is in second-to-last and third-to-last of last 3", () => {
-    // last 3 = ["b", "a", "z"]; from=a, to=b; check if b→a adjacent exists → yes
-    expect(isRecentLoop(["b", "a", "z"], "a", "b")).toBe(true);
+  it("returns false when reverse edge is older than last 3 entries", () => {
+    const edges: DispatchEdge[] = [
+      { from: "b", to: "a" }, // the would-be loop trigger
+      { from: "x", to: "y" },
+      { from: "y", to: "z" },
+      { from: "z", to: "w" }, // last 3 is [(x,y),(y,z),(z,w)] → b→a out of window
+    ];
+    expect(isRecentLoop(edges, "a", "b")).toBe(false);
   });
 
-  it("returns false when b→a is older than last 3 entries", () => {
-    // chain = [b, a, z, z, z]; last 3 = [z, z, z]; no b→a there
-    expect(isRecentLoop(["b", "a", "z", "z", "z"], "a", "b")).toBe(false);
+  it("returns false for self-loop (from===to)", () => {
+    expect(isRecentLoop([{ from: "a", to: "a" }], "a", "a")).toBe(false);
   });
 
-  it("returns false for self-loop attempt (from===to)", () => {
-    expect(isRecentLoop(["a", "a"], "a", "a")).toBe(false);
+  it("does NOT flag parallel fan-out members as a loop", () => {
+    // TL fans out to four members in one hop. After that, member Tian's
+    // reply mentions @Luna. There's no Luna→Tian edge in the chain — both
+    // were triggered by Slico in parallel — so this must not be a loop.
+    const edges: DispatchEdge[] = [
+      { from: "slico", to: "eva" },
+      { from: "slico", to: "luna" },
+      { from: "slico", to: "tian" },
+      { from: "slico", to: "nova" },
+    ];
+    expect(isRecentLoop(edges, "tian", "luna")).toBe(false);
+    expect(isRecentLoop(edges, "tian", "nova")).toBe(false);
+    expect(isRecentLoop(edges, "luna", "tian")).toBe(false);
   });
 
-  it("returns false when only from exists in chain but not adjacent to to", () => {
-    // chain = ["x", "y", "a"]; from="a", to="x"; last 3 = ["x","y","a"]
-    // check adjacent pairs: x→y, y→a; neither is x→a (to→from), so false
-    expect(isRecentLoop(["x", "y", "a"], "a", "x")).toBe(false);
+  it("does flag a real back-edge across hops", () => {
+    // Sequential A → B → A: the second back-edge is the loop.
+    const edges: DispatchEdge[] = [
+      { from: "a", to: "b" },
+    ];
+    expect(isRecentLoop(edges, "b", "a")).toBe(true);
   });
 });

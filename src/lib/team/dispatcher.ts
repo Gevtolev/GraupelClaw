@@ -19,7 +19,7 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     rootUserMessageId: opts.rootUserMessageId,
     hop: 0,
     maxHops,
-    activatedChain: [],
+    activatedEdges: [],
   };
 
   const validIds = new Set(opts.team.agentIds);
@@ -55,7 +55,6 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     );
 
     ctx.hop += 1;
-    ctx.activatedChain.push(...currentTargets);
     isUserHop = false;
 
     if (opts.isAborted(ctx.conversationId)) {
@@ -81,13 +80,14 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       );
       for (const m of mentions) {
         if (m.agentId === reply.fromAgentId) continue;
-        if (isRecentLoop(ctx.activatedChain, reply.fromAgentId, m.agentId)) {
+        if (isRecentLoop(ctx.activatedEdges, reply.fromAgentId, m.agentId)) {
           loopDetected = true;
           continue;
         }
         if (seen.has(m.agentId)) continue;
         seen.add(m.agentId);
         nextTargets.push(m.agentId);
+        ctx.activatedEdges.push({ from: reply.fromAgentId, to: m.agentId });
       }
     }
     console.debug(
