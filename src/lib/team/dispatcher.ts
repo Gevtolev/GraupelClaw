@@ -35,12 +35,19 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       : [];
   let isUserHop = true;
 
+  console.debug(
+    "[team-dispatcher] start conv", ctx.conversationId,
+    "tlId:", tlId,
+    "userMentions:", userMentions.map(m => m.agentId),
+    "initialTargets:", currentTargets,
+  );
   while (currentTargets.length > 0 && ctx.hop < ctx.maxHops) {
     if (opts.isAborted(ctx.conversationId)) {
       opts.onCascadeStopped?.({ reason: "abort", hop: ctx.hop });
       return;
     }
 
+    console.debug("[team-dispatcher] dispatching hop", ctx.hop, "to", currentTargets, "isUserHop:", isUserHop);
     const replies = await Promise.all(
       currentTargets.map(agentId =>
         dispatchOne({ agentId, ctx, opts, isUserHop }),
@@ -61,8 +68,17 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     let loopDetected = false;
 
     for (const reply of replies) {
-      if (!reply) continue;
+      if (!reply) {
+        console.debug("[team-dispatcher] hop", ctx.hop, "got null reply (sendToAgent failed or no message saved)");
+        continue;
+      }
       const mentions = parseMentions(reply.content, validIds, nameToId);
+      console.debug(
+        "[team-dispatcher] hop", ctx.hop,
+        "parsed", mentions.length, "mentions from", reply.fromAgentId,
+        "(content len:", reply.content.length, ")",
+        mentions.map(m => `@${m.name}(${m.agentId})`).join(" "),
+      );
       for (const m of mentions) {
         if (m.agentId === reply.fromAgentId) continue;
         if (isRecentLoop(ctx.activatedChain, reply.fromAgentId, m.agentId)) {
@@ -74,6 +90,11 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
         nextTargets.push(m.agentId);
       }
     }
+    console.debug(
+      "[team-dispatcher] hop", ctx.hop, "→", ctx.hop + 1,
+      "nextTargets:", nextTargets,
+      "loopDetected:", loopDetected,
+    );
 
     if (loopDetected) {
       opts.onCascadeStopped?.({ reason: "loop", hop: ctx.hop });
