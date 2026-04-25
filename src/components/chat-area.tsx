@@ -159,6 +159,46 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallContent }) {
   );
 }
 
+// Render user-typed text: keep everything as plain text, but turn
+// @[Name](id) tokens into the same mention chip the assistant side uses.
+function UserMessageBody({
+  content,
+  teamAgentMap,
+}: {
+  content: string;
+  teamAgentMap?: Map<string, string>;
+}) {
+  const re = /@\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) parts.push(content.slice(last, m.index));
+    const [, label, href] = m;
+    const liveName = teamAgentMap?.get(href);
+    if (liveName !== undefined) {
+      parts.push(
+        <span
+          key={`mention-${key++}`}
+          className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/30 mx-0.5"
+        >
+          @{liveName}
+        </span>,
+      );
+    } else {
+      parts.push(
+        <span key={`mention-stale-${key++}`} className="text-muted-foreground">
+          @{label.replace(/^@/, "")}
+        </span>,
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < content.length) parts.push(content.slice(last));
+  return <p className="whitespace-pre-wrap">{parts}</p>;
+}
+
 function CopyMessageButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -668,7 +708,7 @@ export function ChatArea() {
                 )}
                 <div className="text-[15px] leading-relaxed text-foreground">
                   {isUser ? (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <UserMessageBody content={msg.content} teamAgentMap={teamAgentMap} />
                   ) : (
                     <MarkdownRenderer content={msg.content} agentId={msg.agentId} teamAgentMap={teamAgentMap} />
                   )}
