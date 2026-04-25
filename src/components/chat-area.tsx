@@ -478,7 +478,7 @@ export function ChatArea() {
                 className="ml-auto flex items-center -space-x-2 rounded-full px-1 py-0.5 hover:bg-muted/60 transition-colors"
                 aria-label={`Show all ${teamAgents.length} members`}
               >
-                {teamAgents.slice(0, 3).map((agent) => {
+                {teamAgents.map((agent) => {
                   const isTl = agent.id === tlAgentId;
                   return (
                     <div key={agent.id} className="relative">
@@ -502,11 +502,6 @@ export function ChatArea() {
                     </div>
                   );
                 })}
-                {teamAgents.length > 3 && (
-                  <span className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground">
-                    +{teamAgents.length - 3}
-                  </span>
-                )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80 max-h-[60vh] overflow-y-auto">
