@@ -35,7 +35,7 @@ describe("dispatchTeamMessage", () => {
     expect(sendToAgent.mock.calls[0][0]).toBe("a2");
   });
 
-  it("activates @mentioned agents in parallel, skipping TL when user @s only workers (no auto re-engage)", async () => {
+  it("activates @mentioned agents in parallel when user @s them directly", async () => {
     const t = team(["a1", "a2", "a3"], "a1");
     const agents = [agent("a1", "A"), agent("a2", "B"), agent("a3", "C")];
     const s = state(agents, [t]);
@@ -47,25 +47,17 @@ describe("dispatchTeamMessage", () => {
       isAborted: () => false, buildSessionKey, maxHops: 8,
     });
 
-    // User explicitly bypassed the TL, so we don't pull the TL back in.
     expect(sendToAgent).toHaveBeenCalledTimes(2);
     const calledIds = sendToAgent.mock.calls.map(c => c[0]).sort();
     expect(calledIds).toEqual(["a2", "a3"]);
   });
 
-  it("cascades: TL reply @s member → member dispatched, then TL auto re-engages", async () => {
+  it("cascades: TL reply @s member → member dispatched at hop 2", async () => {
     const t = team(["a1", "a2"], "a1");
     const agents = [agent("a1", "A"), agent("a2", "B")];
     const s = state(agents, [t]);
-    let a1Calls = 0;
     const sendToAgent = vi.fn(async (id: string) => {
-      if (id === "a1") {
-        a1Calls += 1;
-        // First call: delegate to B. Second call (auto re-engage): just wrap up.
-        return a1Calls === 1
-          ? { fromAgentId: "a1", content: "let @[B](a2) handle this" }
-          : { fromAgentId: "a1", content: "thanks, all done" };
-      }
+      if (id === "a1") return { fromAgentId: "a1", content: "let @[B](a2) handle this" };
       return { fromAgentId: "a2", content: "done" };
     });
 
@@ -75,18 +67,18 @@ describe("dispatchTeamMessage", () => {
       isAborted: () => false, buildSessionKey, maxHops: 8,
     });
 
-    // Hop 0: TL → Hop 1: B → auto re-engage Hop 2: TL again
-    expect(sendToAgent).toHaveBeenCalledTimes(3);
-    expect(sendToAgent.mock.calls.map(c => c[0])).toEqual(["a1", "a2", "a1"]);
+    expect(sendToAgent).toHaveBeenCalledTimes(2);
+    expect(sendToAgent.mock.calls.map(c => c[0])).toEqual(["a1", "a2"]);
   });
 
-  it("worker @-mentions in replies do NOT trigger another dispatch (hub-and-spoke)", async () => {
+  it("free routing: a worker's @-mention CAN trigger another agent in the next hop", async () => {
     const t = team(["a1", "a2", "a3"], "a1");
     const agents = [agent("a1", "A"), agent("a2", "B"), agent("a3", "C")];
     const s = state(agents, [t]);
     const sendToAgent = vi.fn(async (id: string) => {
       if (id === "a1") return { fromAgentId: "a1", content: "go @[B](a2)" };
-      // Worker B's reply tries to @ C — must be ignored.
+      // Worker B's reply hands off to C — under accio-style free routing this
+      // SHOULD cascade.
       if (id === "a2") return { fromAgentId: "a2", content: "@[C](a3) please review" };
       return { fromAgentId: "a3", content: "ack" };
     });
@@ -97,10 +89,31 @@ describe("dispatchTeamMessage", () => {
       isAborted: () => false, buildSessionKey, maxHops: 8,
     });
 
-    // a3 must never be dispatched; cascade is TL → B → TL (auto).
-    const calledIds = sendToAgent.mock.calls.map(c => c[0]);
-    expect(calledIds).not.toContain("a3");
-    expect(calledIds).toEqual(["a1", "a2", "a1"]);
+    expect(sendToAgent.mock.calls.map(c => c[0])).toEqual(["a1", "a2", "a3"]);
+  });
+
+  it("once-per-cascade dedup: same agent never dispatched twice across hops", async () => {
+    // Common failure mode: TL @s Eva and Tian; Tian's reply also @s Eva. Eva
+    // must NOT be re-dispatched — she already handled the prompt at hop 1.
+    const t = team(["a1", "a2", "a3"], "a1");
+    const agents = [agent("a1", "TL"), agent("a2", "Eva"), agent("a3", "Tian")];
+    const s = state(agents, [t]);
+    const sendToAgent = vi.fn(async (id: string) => {
+      if (id === "a1") return { fromAgentId: "a1", content: "@[Eva](a2) and @[Tian](a3)" };
+      if (id === "a2") return { fromAgentId: "a2", content: "researched" };
+      // Tian tries to ping Eva — must be skipped by dedup.
+      if (id === "a3") return { fromAgentId: "a3", content: "@[Eva](a2) sync with me" };
+      return { fromAgentId: id, content: "" };
+    });
+
+    await dispatchTeamMessage({
+      team: t, conversationId: "c1", rootUserMessageId: "m1",
+      userContent: "do X", getState: () => s, sendToAgent,
+      isAborted: () => false, buildSessionKey, maxHops: 8,
+    });
+
+    const evaCalls = sendToAgent.mock.calls.filter(c => c[0] === "a2");
+    expect(evaCalls.length).toBe(1);
   });
 
   it("drops self-mentions in replies", async () => {
@@ -122,24 +135,20 @@ describe("dispatchTeamMessage", () => {
   });
 
   it("stops at max_hops and invokes onCascadeStopped with max_hops reason", async () => {
-    // Under hub-and-spoke a deep cascade looks like TL → worker → TL → worker → ...
-    // because workers cannot dispatch each other. The TL keeps delegating to a
-    // fresh worker each turn. With maxHops=3 we expect exactly 3 dispatches
-    // (TL, worker, TL again) before the loop exits on hop count.
-    const t = team(["a1", "a2", "a3", "a4"], "a1");
-    const agents = [agent("a1", "A"), agent("a2", "B"), agent("a3", "C"), agent("a4", "D")];
+    // Sequential cascade a1 → a2 → a3 → a4 → a5 (each agent @s the next).
+    // Free routing + maxHops=3 → exactly 3 dispatches before exiting on hop count.
+    const t = team(["a1", "a2", "a3", "a4", "a5"], "a1");
+    const agents = [
+      agent("a1", "A"), agent("a2", "B"), agent("a3", "C"),
+      agent("a4", "D"), agent("a5", "E"),
+    ];
     const s = state(agents, [t]);
-    let tlCallIndex = 0;
-    const tlNext = ["a2", "a3", "a4"]; // TL keeps picking a new worker
-    const tlNextName = ["B", "C", "D"];
+    const next: Record<string, string> = { a1: "a2", a2: "a3", a3: "a4", a4: "a5", a5: "" };
+    const nextName: Record<string, string> = { a1: "B", a2: "C", a3: "D", a4: "E", a5: "" };
     const sendToAgent = vi.fn(async (id: string) => {
-      if (id === "a1") {
-        const target = tlNext[tlCallIndex];
-        const name = tlNextName[tlCallIndex];
-        tlCallIndex += 1;
-        return { fromAgentId: "a1", content: target ? `@[${name}](${target})` : "done" };
-      }
-      return { fromAgentId: id, content: "ok" };
+      const targetId = next[id];
+      const content = targetId ? `@[${nextName[id]}](${targetId})` : "done";
+      return { fromAgentId: id, content };
     });
     const onCascadeStopped = vi.fn();
 
@@ -169,9 +178,12 @@ describe("dispatchTeamMessage", () => {
       isAborted: () => false, buildSessionKey, maxHops: 8, onCascadeStopped,
     });
 
-    expect(onCascadeStopped).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "loop" })
-    );
+    // Note: dedup actually kicks in BEFORE loop detector here — a1 is already
+    // dispatched in this cascade so a2's @a1 is silently skipped. Cascade
+    // ends naturally without firing onCascadeStopped(loop). Either outcome
+    // (loop or natural end) is acceptable as long as a1 isn't re-dispatched.
+    const a1Calls = sendToAgent.mock.calls.filter(c => c[0] === "a1");
+    expect(a1Calls.length).toBe(1);
   });
 
   it("respects isAborted and stops with abort reason", async () => {
@@ -227,21 +239,17 @@ describe("dispatchTeamMessage", () => {
     expect(sendToAgent.mock.calls[0][0]).toBe("a1");
   });
 
-  it("deduplicates targets within a single TL fan-out", async () => {
-    const t = team(["a1", "a2", "a3"], "a1");
-    const agents = [agent("a1", "A"), agent("a2", "B"), agent("a3", "C")];
+  it("deduplicates targets within a single hop when multiple replies @ the same agent", async () => {
+    // Two parallel members both @ the same downstream agent in the same hop.
+    // The downstream agent should be dispatched only once.
+    const t = team(["a1", "a2", "a3", "a4"], "a1");
+    const agents = [agent("a1", "A"), agent("a2", "B"), agent("a3", "C"), agent("a4", "D")];
     const s = state(agents, [t]);
-    let tlCalls = 0;
     const sendToAgent = vi.fn(async (id: string) => {
-      if (id === "a1") {
-        tlCalls += 1;
-        // First call from user: TL @s the same worker twice in one reply.
-        // Second call (auto re-engage): wrap up.
-        return tlCalls === 1
-          ? { fromAgentId: "a1", content: "@[B](a2) please. also @[B](a2) again." }
-          : { fromAgentId: "a1", content: "done" };
-      }
-      return { fromAgentId: id, content: "ok" };
+      if (id === "a1") return { fromAgentId: "a1", content: "split: @[B](a2) @[C](a3)" };
+      if (id === "a2") return { fromAgentId: "a2", content: "ping @[D](a4)" };
+      if (id === "a3") return { fromAgentId: "a3", content: "also ping @[D](a4)" };
+      return { fromAgentId: "a4", content: "done" };
     });
 
     await dispatchTeamMessage({
@@ -250,8 +258,7 @@ describe("dispatchTeamMessage", () => {
       isAborted: () => false, buildSessionKey, maxHops: 8,
     });
 
-    // a2 dispatched only once despite TL mentioning twice in the same reply.
-    const a2Calls = sendToAgent.mock.calls.filter(c => c[0] === "a2");
-    expect(a2Calls.length).toBe(1);
+    const a4Calls = sendToAgent.mock.calls.filter(c => c[0] === "a4");
+    expect(a4Calls.length).toBe(1);
   });
 });
