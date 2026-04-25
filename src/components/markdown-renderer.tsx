@@ -123,6 +123,12 @@ function FileDownload({ name, src }: { name: string; src: string }) {
 function preprocessContent(content: string, agentId?: string): string {
   let result = content;
 
+  // Strip the literal `@` prefix in front of mention links so the chip's own
+  // `@` glyph isn't duplicated by the surrounding markdown text.
+  // Matches `@[label](href)` → `[label](href)` while leaving lone `@` chars
+  // (in code blocks or unrelated prose) alone.
+  result = result.replace(/@(\[[^\]]+\]\([^)]+\))/g, "$1");
+
   // 1. Workspace paths (with or without backticks)
   if (agentId) {
     result = result.replace(
