@@ -105,6 +105,13 @@ describe("parseMentions", () => {
       ]);
     });
 
+    it("never dispatches a name that lacks the @ prefix (even if it's in the roster)", () => {
+      // 'Alice' / 'bob' appear in the prose without @ — must NOT trigger.
+      expect(parseMentions("Alice 你看下，让 bob 跟进", valid, nameMap)).toEqual([]);
+      // CJK case
+      expect(parseMentions("小天 你来定", valid, nameMap)).toEqual([]);
+    });
+
     it("rejects glued tokens — @allowance does not match @all-style entries", () => {
       const m = new Map([["all", "a-all"], ["alice", "a1"]]);
       const validIds = new Set(["a-all", "a1"]);
