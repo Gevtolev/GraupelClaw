@@ -28,6 +28,8 @@ export function assembleAgentPrompt(opts: AssembleOpts): string {
 }
 
 function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): string {
+  const tl = roster.find(r => r.role === "TL");
+  const tlMention = tl ? `@${tl.name}` : "the TL";
   const rosterLines = roster
     .map(r => {
       const tag = r.role === "TL" ? " (TL)" : "";
@@ -48,6 +50,12 @@ function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): s
       : `# You are a Member of "${team.name}"
 The TL coordinates the team. You respond when @mentioned.`;
 
+  const memberFlow = self.role === "TL"
+    ? `- You are the dispatcher. @-mention any member you need to assign a concrete subtask to. Avoid mentioning more than ~3 members in a single turn unless the user explicitly asked for a fan-out.`
+    : `- **Default: report status, results, questions, and blockers back to the TL via \`${tlMention}\`.** The TL is the coordinator and decides who picks up next.
+- @-mention a peer directly only when you are handing over a **specific, concrete sub-task** that fits squarely within their role (e.g., a designer handing a finalized spec to the engineer). For anything else, go through the TL.
+- Don't broadcast to multiple peers. If the work needs more than one person, surface it to the TL.`;
+
   return `<team_context>
 ${roleHeader}
 
@@ -64,5 +72,8 @@ ${rosterLines}
   never see the exchange. Stick to @-mentions for team-internal work;
   reserve \`sessions_spawn\` for one-off helpers that don't belong in the
   group log.
+
+## Routing
+${memberFlow}
 </team_context>`;
 }
