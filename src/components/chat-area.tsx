@@ -36,7 +36,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from "uuid";
-import { MentionAutocomplete, MENTION_ALL } from "@/components/team/mention-autocomplete";
+import { MentionAutocomplete, MENTION_ALL, type MentionAutocompleteHandle } from "@/components/team/mention-autocomplete";
 import type { Agent, StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
 
 function StreamingIndicator({ phase }: { phase: StreamingPhase }) {
@@ -230,6 +230,7 @@ export function ChatArea() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAnchor, setMentionAnchor] = useState<DOMRect | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionRef = useRef<MentionAutocompleteHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -394,12 +395,38 @@ export function ChatArea() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // While the mention popover is open, take over arrow/enter/tab/escape so
+      // the user can pick with the keyboard instead of the mouse.
+      if (mentionQuery !== null && mentionRef.current) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          mentionRef.current.moveDown();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          mentionRef.current.moveUp();
+          return;
+        }
+        if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !composing) {
+          if (mentionRef.current.commitActive()) {
+            e.preventDefault();
+            return;
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setMentionQuery(null);
+          setMentionAnchor(null);
+          return;
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey && !composing) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend, composing]
+    [handleSend, composing, mentionQuery]
   );
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -919,6 +946,7 @@ export function ChatArea() {
           />
           {mentionQuery !== null && target?.type === "team" && (
             <MentionAutocomplete
+              ref={mentionRef}
               candidates={teamAgents.map(a => ({ agent: a }))}
               query={mentionQuery}
               onSelect={insertMention}
