@@ -239,4 +239,36 @@ describe("deleteConversation", () => {
     expect(db).toHaveBeenCalledWith("local-1");
     expect(dispatchSession).toHaveBeenCalledWith({ type: "DELETE_CONVERSATION", id: "local-1" });
   });
+
+  it("native-session: routes RPC through the active company, not companies[0]", async () => {
+    // Two companies registered, but the second one is active. The deletion
+    // must hit the active company's gateway URL/token, not the first one.
+    const c1: Company = {
+      id: "c1", name: "co1", runtimeType: "openclaw",
+      gatewayUrl: "http://wrong-gw", gatewayToken: "wrong-tk",
+      createdAt: 0, updatedAt: 0,
+    };
+    const c2: Company = {
+      id: "c2", name: "co2", runtimeType: "openclaw",
+      gatewayUrl: "http://right-gw", gatewayToken: "right-tk",
+      createdAt: 0, updatedAt: 0,
+    };
+    const dispatchSession = vi.fn();
+    const rpc = vi.fn(async () => ({ ok: true, payload: {} }));
+    await deleteConversation("s1", {
+      getGatewayState: () => ({
+        companies: [c1, c2], activeCompanyId: "c2",
+        connectionStatus: "connected", initialized: true,
+      }),
+      getConversations: () => [{
+        id: "s1", source: "native-session", sessionKey: "agent:a1:x:s1",
+      } as Conversation],
+      dispatchSession,
+      gatewayRpc: rpc,
+      dbDeleteConversation: vi.fn(),
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "http://right-gw", "right-tk", "sessions.delete", expect.anything(),
+    );
+  });
 });

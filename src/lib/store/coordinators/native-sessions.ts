@@ -238,7 +238,7 @@ export async function deleteConversation(
   const conversation = deps.getConversations().find(c => c.id === id);
   if (conversation?.source === "native-session") {
     const gateway = deps.getGatewayState();
-    const company = gateway.companies[0];
+    const company = gateway.companies.find(c => c.id === gateway.activeCompanyId);
     if (company?.gatewayUrl && company?.gatewayToken) {
       const sessionKey = conversation.sessionKey ?? conversation.id;
       const result = await deps.gatewayRpc(

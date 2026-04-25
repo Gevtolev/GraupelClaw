@@ -173,8 +173,11 @@ export function AgentSettingsDialog({
       avatar: (updates.avatar ?? avatar) || undefined,
     };
     if (!merged.name) return;
-    // Mark as user-customized name so gateway sync won't overwrite it
-    if (updates.name !== undefined && updates.name.trim() !== agent.name) {
+    // Mark as user-customized name so gateway sync won't overwrite it.
+    // Compare the merged value to agent.name so blur-saves (which pass an
+    // empty updates object) still flip the flag when the user typed a new
+    // name into local state but only fires onBlur to commit.
+    if (merged.name !== agent.name) {
       merged.customName = true;
     }
     await agentStore.updateAgent(agent.id, merged);
