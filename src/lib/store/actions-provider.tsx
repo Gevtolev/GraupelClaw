@@ -10,6 +10,7 @@ import {
   createAgent as dbCreateAgent,
   updateAgent as dbUpdateAgent,
   deleteAgent as dbDeleteAgent,
+  updateTeam as dbUpdateTeam,
   deleteTeam as dbDeleteTeam,
   getAgentsByCompany,
   getTeamsByCompany,
@@ -116,6 +117,8 @@ export function ActionsProvider({ children }: { children: React.ReactNode }) {
       dispatchAgent: agent.dispatch,
       dbUpdateAgent,
       dbCreateAgent,
+      dbDeleteAgent,
+      dbUpdateTeam,
     });
   }, [gateway, agent]);
 
@@ -201,6 +204,19 @@ export function ActionsProvider({ children }: { children: React.ReactNode }) {
 
     await dbDeleteAgent(id);
     agent.dispatch({ type: "REMOVE_AGENT", id });
+
+    // Prune the deleted agent from any team rosters in this company so the UI
+    // count and dispatcher stay in sync.
+    const teamsAfter = agent.getState().teams.filter(t => t.companyId === ag?.companyId);
+    for (const team of teamsAfter) {
+      if (!team.agentIds.includes(id) && team.tlAgentId !== id) continue;
+      const updates: Partial<typeof team> = {
+        agentIds: team.agentIds.filter(x => x !== id),
+      };
+      if (team.tlAgentId === id) updates.tlAgentId = null;
+      await dbUpdateTeam(team.id, updates);
+      agent.dispatch({ type: "UPDATE_TEAM", id: team.id, updates });
+    }
 
     try {
       await fetch("/api/agents/delete", {

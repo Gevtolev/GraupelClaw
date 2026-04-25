@@ -209,6 +209,12 @@ export function ChatArea() {
     ? agentState.agents.filter((a) => targetTeam.agentIds.includes(a.id))
     : [];
   const tlAgentId = targetTeam ? resolveTlAgentId(targetTeam) : null;
+  // id → live name lookup for mention chips. Built from teamAgents (already
+  // filters orphans) so stale @mentions in older messages render as plain text
+  // instead of leaking raw ids into chips.
+  const teamAgentMap = targetTeam
+    ? new Map(teamAgents.map((a) => [a.id, a.name] as const))
+    : undefined;
 
   // Streaming entries for current chat target
   const streamingEntries = Object.entries(chatState.streamingStates).filter(
@@ -595,7 +601,7 @@ export function ChatArea() {
                   {isUser ? (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   ) : (
-                    <MarkdownRenderer content={msg.content} agentId={msg.agentId} teamAgentIds={targetTeam ? new Set(targetTeam.agentIds) : undefined} />
+                    <MarkdownRenderer content={msg.content} agentId={msg.agentId} teamAgentMap={teamAgentMap} />
                   )}
                 </div>
                 {msg.attachments && msg.attachments.length > 0 && (
@@ -686,7 +692,7 @@ export function ChatArea() {
 
                 <div className="text-[15px] leading-relaxed text-foreground">
                   {streaming.content ? (
-                    <MarkdownRenderer content={streaming.content} agentId={agentId} teamAgentIds={targetTeam ? new Set(targetTeam.agentIds) : undefined} />
+                    <MarkdownRenderer content={streaming.content} agentId={agentId} teamAgentMap={teamAgentMap} />
                   ) : streaming.toolCalls && streaming.toolCalls.length > 0 ? null : (
                     <div className="flex items-center gap-1 py-2">
                       <span className="flex gap-[3px] items-center">

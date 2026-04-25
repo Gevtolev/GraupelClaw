@@ -167,7 +167,7 @@ function preprocessContent(content: string, agentId?: string): string {
 
 const MEDIA_MARKER_RE = /%%MEDIA\|(audio|video|file)\|([^|]+)\|((?:[^%]|%(?!%))*)%%/g;
 
-export function MarkdownRenderer({ content, agentId, teamAgentIds }: { content: string; agentId?: string; teamAgentIds?: Set<string> }) {
+export function MarkdownRenderer({ content, agentId, teamAgentMap }: { content: string; agentId?: string; teamAgentMap?: Map<string, string> }) {
   const processed = preprocessContent(content, agentId);
 
   // Split content by media markers and render each segment
@@ -180,7 +180,7 @@ export function MarkdownRenderer({ content, agentId, teamAgentIds }: { content: 
     // Render markdown text before this marker
     const textBefore = processed.slice(lastIndex, match.index).trim();
     if (textBefore) {
-      parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={textBefore} teamAgentIds={teamAgentIds} />);
+      parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={textBefore} teamAgentMap={teamAgentMap} />);
     }
     // Render the media component
     const [, type, name, src] = match;
@@ -197,18 +197,18 @@ export function MarkdownRenderer({ content, agentId, teamAgentIds }: { content: 
   // Remaining text after last marker
   const remaining = processed.slice(lastIndex).trim();
   if (remaining) {
-    parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={remaining} teamAgentIds={teamAgentIds} />);
+    parts.push(<MarkdownSegment key={`md-${lastIndex}`} content={remaining} teamAgentMap={teamAgentMap} />);
   }
 
   // If no media markers found, render as single markdown
   if (parts.length === 0) {
-    return <MarkdownSegment content={processed} teamAgentIds={teamAgentIds} />;
+    return <MarkdownSegment content={processed} teamAgentMap={teamAgentMap} />;
   }
 
   return <>{parts}</>;
 }
 
-function MarkdownSegment({ content, teamAgentIds }: { content: string; teamAgentIds?: Set<string> }) {
+function MarkdownSegment({ content, teamAgentMap }: { content: string; teamAgentMap?: Map<string, string> }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -305,13 +305,22 @@ function MarkdownSegment({ content, teamAgentIds }: { content: string; teamAgent
         },
         a({ href, children }) {
           const agentId = href ?? "";
-          if (teamAgentIds?.has(agentId)) {
-            const label = Array.isArray(children) ? children.join("") : String(children ?? "");
+          const liveName = teamAgentMap?.get(agentId);
+          if (liveName !== undefined) {
+            // Resolved member of this team — render as a mention chip with the
+            // live name (overrides any stale label baked into the message).
             return (
               <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/30 mx-0.5">
-                @{label.replace(/^@/, "")}
+                @{liveName}
               </span>
             );
+          }
+          // Orphan or non-member: if href looks like a UUID/agent id, treat the
+          // whole thing as plain text instead of a link to avoid showing raw ids.
+          const isAgentLikeHref = /^[0-9a-f-]{8,}$|^main$|^[a-z][\w-]*$/i.test(agentId);
+          if (isAgentLikeHref) {
+            const label = Array.isArray(children) ? children.join("") : String(children ?? "");
+            return <span className="text-muted-foreground">@{label.replace(/^@/, "")}</span>;
           }
           return (
             <a

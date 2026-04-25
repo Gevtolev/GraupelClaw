@@ -124,14 +124,17 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
     role: (agentId === tlId ? "TL" : "Member") as "TL" | "Member",
   };
 
-  const roster: RosterEntry[] = team.agentIds.map(id => {
+  // Skip orphan ids (agents removed from gateway but still in team.agentIds) so
+  // the TL prompt never instructs them to @-mention non-existent members.
+  const roster: RosterEntry[] = team.agentIds.flatMap(id => {
     const a = state.agents.find(x => x.id === id);
-    return {
+    if (!a) return [];
+    return [{
       agentId: id,
-      name: a?.name ?? id,
-      description: a?.description,
-      role: id === tlId ? "TL" : "Member",
-    };
+      name: a.name,
+      description: a.description,
+      role: (id === tlId ? "TL" : "Member") as "TL" | "Member",
+    }];
   });
 
   const userMentions = parseMentions(

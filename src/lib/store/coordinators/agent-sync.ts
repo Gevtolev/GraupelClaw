@@ -1,4 +1,4 @@
-import type { Agent, AgentSpecialty } from "@/types";
+import type { Agent, AgentSpecialty, AgentTeam } from "@/types";
 import type { GatewayState } from "@/lib/store/gateway/types";
 import type { AgentState, AgentAction } from "@/lib/store/agent/types";
 
@@ -8,6 +8,8 @@ export interface SyncAgentsOpts {
   dispatchAgent: (action: AgentAction) => void;
   dbUpdateAgent: (id: string, updates: Partial<Agent>) => Promise<unknown>;
   dbCreateAgent: (agent: Agent) => Promise<unknown>;
+  dbDeleteAgent: (id: string) => Promise<unknown>;
+  dbUpdateTeam: (id: string, updates: Partial<AgentTeam>) => Promise<unknown>;
   fetchFn?: typeof fetch;
 }
 
@@ -71,6 +73,31 @@ export async function syncAgents(opts: SyncAgentsOpts): Promise<void> {
         } catch {
           // Agent may already exist in another company — skip silently (matches legacy)
         }
+      }
+    }
+
+    // Reconcile orphans: any local agent in this company whose id is not in the
+    // gateway response is no longer managed by the gateway. Remove it from
+    // local DB + state, and prune any team that referenced it.
+    const gatewayIds = new Set(data.agents.map(a => a.id));
+    const orphans = existingAgents.filter(a => !gatewayIds.has(a.id));
+    if (orphans.length > 0) {
+      const orphanIds = new Set(orphans.map(a => a.id));
+      for (const orphan of orphans) {
+        await opts.dbDeleteAgent(orphan.id);
+        opts.dispatchAgent({ type: "REMOVE_AGENT", id: orphan.id });
+      }
+      // Prune team references in this company. Reread team list to pick up any
+      // ADD/UPDATE dispatched above (live snapshot, not the captured one).
+      const teamsNow = opts.getAgentState().teams.filter(t => t.companyId === company.id);
+      for (const team of teamsNow) {
+        const filteredAgentIds = team.agentIds.filter(id => !orphanIds.has(id));
+        const tlGone = team.tlAgentId && orphanIds.has(team.tlAgentId);
+        if (filteredAgentIds.length === team.agentIds.length && !tlGone) continue;
+        const updates: Partial<AgentTeam> = { agentIds: filteredAgentIds };
+        if (tlGone) updates.tlAgentId = null;
+        await opts.dbUpdateTeam(team.id, updates);
+        opts.dispatchAgent({ type: "UPDATE_TEAM", id: team.id, updates });
       }
     }
   } catch {

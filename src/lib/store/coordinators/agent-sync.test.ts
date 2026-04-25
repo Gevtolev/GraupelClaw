@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Agent, Company } from "@/types";
+import type { Agent, AgentTeam, Company } from "@/types";
 import type { AgentAction, AgentState } from "@/lib/store/agent/types";
 import type { GatewayState } from "@/lib/store/gateway/types";
 import { syncAgents } from "./agent-sync";
@@ -41,16 +41,34 @@ function mockEnv(opts: {
   const dispatchAgent = vi.fn<(a: AgentAction) => void>();
   const dbUpdateAgent = vi.fn(async () => {});
   const dbCreateAgent = vi.fn(async () => {});
+  const dbDeleteAgent = vi.fn(async () => {});
+  const dbUpdateTeam = vi.fn(async () => {});
   const fetchFn = vi.fn(async () => ({
     ok: opts.fetchOk ?? true,
     json: async () => opts.fetchResponse,
   })) as unknown as typeof fetch;
+  // Live state read so the coordinator sees ADD/UPDATE/REMOVE dispatched during the
+  // run when it re-reads via getAgentState() (mirrors Provider's stateRef behaviour).
+  const stateRef = { current: agentState };
+  dispatchAgent.mockImplementation((action: AgentAction) => {
+    if (action.type === "REMOVE_AGENT") {
+      stateRef.current = { ...stateRef.current, agents: stateRef.current.agents.filter(a => a.id !== action.id) };
+    }
+    if (action.type === "UPDATE_TEAM") {
+      stateRef.current = {
+        ...stateRef.current,
+        teams: stateRef.current.teams.map(t => t.id === action.id ? { ...t, ...action.updates } : t),
+      };
+    }
+  });
   return {
     getGatewayState: () => gatewayState,
-    getAgentState: () => agentState,
+    getAgentState: () => stateRef.current,
     dispatchAgent,
     dbUpdateAgent,
     dbCreateAgent,
+    dbDeleteAgent,
+    dbUpdateTeam,
     fetchFn,
   };
 }
@@ -151,5 +169,96 @@ describe("syncAgents coordinator", () => {
     }) as unknown as typeof fetch;
     await expect(syncAgents(env)).resolves.toBeUndefined();
     expect(env.dispatchAgent).not.toHaveBeenCalled();
+  });
+
+  it("removes local orphan agents not present in the gateway response", async () => {
+    const env = mockEnv({
+      gateway: { companies: [company()], activeCompanyId: "c1" },
+      agent: {
+        agents: [agent("a1"), agent("orphan-1"), agent("orphan-2")],
+      },
+      fetchResponse: { agents: [{ id: "a1", name: "A1" }] },
+    });
+    await syncAgents(env);
+    expect(env.dbDeleteAgent).toHaveBeenCalledWith("orphan-1");
+    expect(env.dbDeleteAgent).toHaveBeenCalledWith("orphan-2");
+    expect(env.dispatchAgent).toHaveBeenCalledWith({ type: "REMOVE_AGENT", id: "orphan-1" });
+    expect(env.dispatchAgent).toHaveBeenCalledWith({ type: "REMOVE_AGENT", id: "orphan-2" });
+  });
+
+  it("does NOT delete agents from other companies (orphan check is scoped)", async () => {
+    const env = mockEnv({
+      gateway: { companies: [company()], activeCompanyId: "c1" },
+      agent: {
+        agents: [
+          agent("a1"),
+          agent("from-c2", { companyId: "c2" }),
+        ],
+      },
+      fetchResponse: { agents: [{ id: "a1", name: "A1" }] },
+    });
+    await syncAgents(env);
+    expect(env.dbDeleteAgent).not.toHaveBeenCalledWith("from-c2");
+  });
+
+  it("prunes team.agentIds of removed orphans and clears tlAgentId when TL is orphaned", async () => {
+    const team: AgentTeam = {
+      id: "t1", companyId: "c1", name: "Team",
+      agentIds: ["a1", "orphan-1", "orphan-2"],
+      tlAgentId: "orphan-1",
+      createdAt: 0,
+    };
+    const env = mockEnv({
+      gateway: { companies: [company()], activeCompanyId: "c1" },
+      agent: {
+        agents: [agent("a1"), agent("orphan-1"), agent("orphan-2")],
+        teams: [team],
+      },
+      fetchResponse: { agents: [{ id: "a1", name: "A1" }] },
+    });
+    await syncAgents(env);
+    expect(env.dbUpdateTeam).toHaveBeenCalledWith("t1", expect.objectContaining({
+      agentIds: ["a1"],
+      tlAgentId: null,
+    }));
+    expect(env.dispatchAgent).toHaveBeenCalledWith({
+      type: "UPDATE_TEAM",
+      id: "t1",
+      updates: expect.objectContaining({ agentIds: ["a1"], tlAgentId: null }),
+    });
+  });
+
+  it("leaves team.tlAgentId alone when TL is not among orphans", async () => {
+    const team: AgentTeam = {
+      id: "t1", companyId: "c1", name: "Team",
+      agentIds: ["a1", "orphan-1"],
+      tlAgentId: "a1",
+      createdAt: 0,
+    };
+    const env = mockEnv({
+      gateway: { companies: [company()], activeCompanyId: "c1" },
+      agent: {
+        agents: [agent("a1"), agent("orphan-1")],
+        teams: [team],
+      },
+      fetchResponse: { agents: [{ id: "a1", name: "A1" }] },
+    });
+    await syncAgents(env);
+    const teamUpdate = env.dbUpdateTeam.mock.calls.find(c => c[0] === "t1");
+    expect(teamUpdate?.[1]).toEqual({ agentIds: ["a1"] });
+  });
+
+  it("does NOT prune teams that have no orphan ids", async () => {
+    const team: AgentTeam = {
+      id: "t1", companyId: "c1", name: "Team",
+      agentIds: ["a1"], tlAgentId: "a1", createdAt: 0,
+    };
+    const env = mockEnv({
+      gateway: { companies: [company()], activeCompanyId: "c1" },
+      agent: { agents: [agent("a1")], teams: [team] },
+      fetchResponse: { agents: [{ id: "a1", name: "A1" }] },
+    });
+    await syncAgents(env);
+    expect(env.dbUpdateTeam).not.toHaveBeenCalled();
   });
 });
