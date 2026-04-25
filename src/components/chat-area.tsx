@@ -28,8 +28,15 @@ import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { loadUserProfile } from "@/components/dialogs/user-profile-dialog";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from "uuid";
-import { MentionAutocomplete } from "@/components/team/mention-autocomplete";
+import { MentionAutocomplete, MENTION_ALL } from "@/components/team/mention-autocomplete";
 import type { Agent, StreamingPhase, MessageAttachment, ToolCallContent } from "@/types";
 
 function StreamingIndicator({ phase }: { phase: StreamingPhase }) {
@@ -341,7 +348,7 @@ export function ChatArea() {
     setAttachments([]);
     // Force scroll to bottom when sending
     isNearBottomRef.current = true;
-    actions.sendMessage(text, atts.length > 0 ? atts : undefined);
+    actions.sendMessage(expandAllMentions(text), atts.length > 0 ? atts : undefined);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
   }, [input, attachments, target, actions]);
 
@@ -375,13 +382,14 @@ export function ChatArea() {
     setMentionAnchor(null);
   }, []);
 
-  function insertMention(agent: Agent) {
+  function insertMention(selection: Agent | typeof MENTION_ALL) {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const pos = textarea.selectionStart ?? 0;
     const before = input.slice(0, pos).replace(/@([\w-]*)$/, "");
     const after = input.slice(pos);
-    const inserted = `@[${agent.name}](${agent.id}) `;
+    const inserted =
+      selection === MENTION_ALL ? "@all " : `@[${selection.name}](${selection.id}) `;
     setInput(before + inserted + after);
     setMentionQuery(null);
     setMentionAnchor(null);
@@ -390,6 +398,17 @@ export function ChatArea() {
       textarea.setSelectionRange(newPos, newPos);
       textarea.focus();
     });
+  }
+
+  // Replace any literal `@all` token (not inside a structured @[...](...))
+  // with explicit @[Name](id) mentions for every team member, so the
+  // dispatcher's mention-parser fans out to the whole team.
+  function expandAllMentions(text: string): string {
+    if (!targetTeam || teamAgents.length === 0) return text;
+    const expansion = teamAgents.map(a => `@[${a.name}](${a.id})`).join(" ");
+    // Match `@all` only as a standalone token (preceded by start/whitespace,
+    // followed by end/whitespace/punctuation) to avoid eating words like "@allies".
+    return text.replace(/(^|\s)@all(?=\s|$|[.,!?;:])/g, (_m, lead) => `${lead}${expansion}`);
   }
 
   // No target selected — empty state
@@ -452,38 +471,93 @@ export function ChatArea() {
           </>
         )}
         {target.type === "team" && teamAgents.length > 0 && (
-          <div className="ml-auto flex items-center -space-x-2">
-            {teamAgents.slice(0, 3).map((agent) => {
-              const identity = agentState.agentIdentities[agent.id];
-              const isTl = agent.id === tlAgentId;
-              return (
-                <div key={agent.id} className="relative" title={isTl ? "Team Leader" : (identity?.name || agent.name)}>
-                  {isEmojiAvatar(agent.avatar) ? (
-                    <span
-                      className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs"
-                    >{agent.avatar}</span>
-                  ) : (
-                    <img
-                      src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
-                      alt={agent.name}
-                      className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
-                    />
-                  )}
-                  {isTl && (
-                    <Crown
-                      className="absolute -top-1 -right-1 h-3 w-3 text-amber-500 fill-amber-500"
-                      aria-label="Team Leader"
-                    />
-                  )}
-                </div>
-              );
-            })}
-            {teamAgents.length > 3 && (
-              <span className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground">
-                +{teamAgents.length - 3}
-              </span>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="ml-auto flex items-center -space-x-2 rounded-full px-1 py-0.5 hover:bg-muted/60 transition-colors"
+                aria-label={`Show all ${teamAgents.length} members`}
+              >
+                {teamAgents.slice(0, 3).map((agent) => {
+                  const isTl = agent.id === tlAgentId;
+                  return (
+                    <div key={agent.id} className="relative">
+                      {isEmojiAvatar(agent.avatar) ? (
+                        <span className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs">
+                          {agent.avatar}
+                        </span>
+                      ) : (
+                        <img
+                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                          alt={agent.name}
+                          className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
+                        />
+                      )}
+                      {isTl && (
+                        <Crown
+                          className="absolute -top-1 -right-1 h-3 w-3 text-amber-500 fill-amber-500"
+                          aria-label="Team Leader"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+                {teamAgents.length > 3 && (
+                  <span className="h-6 w-6 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground">
+                    +{teamAgents.length - 3}
+                  </span>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80 max-h-[60vh] overflow-y-auto">
+              <DropdownMenuLabel className="flex items-center justify-between">
+                <span>Team members</span>
+                <span className="text-xs font-normal text-muted-foreground">{teamAgents.length}</span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {teamAgents.map((agent) => {
+                const isTl = agent.id === tlAgentId;
+                const identity = agentState.agentIdentities[agent.id];
+                const displayName = identity?.name || agent.name;
+                return (
+                  <div key={agent.id} className="flex items-start gap-3 px-2 py-2">
+                    <div className="relative shrink-0">
+                      {isEmojiAvatar(agent.avatar) ? (
+                        <span className="h-9 w-9 rounded-full bg-muted flex items-center justify-center text-lg">
+                          {agent.avatar}
+                        </span>
+                      ) : (
+                        <img
+                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                          alt={displayName}
+                          className="h-9 w-9 rounded-full bg-muted object-cover"
+                        />
+                      )}
+                      {isTl && (
+                        <Crown
+                          className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-500"
+                          aria-label="Team Leader"
+                        />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{displayName}</span>
+                        {isTl && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 ring-1 ring-amber-500/30">TL</span>
+                        )}
+                      </div>
+                      {agent.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3 whitespace-pre-wrap">
+                          {agent.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         <button
           onClick={() => setShowConvPanel(!showConvPanel)}
