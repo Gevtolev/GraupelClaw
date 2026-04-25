@@ -388,7 +388,7 @@ export function ChatArea() {
     setAttachments([]);
     // Force scroll to bottom when sending
     isNearBottomRef.current = true;
-    actions.sendMessage(expandAllMentions(text), atts.length > 0 ? atts : undefined);
+    actions.sendMessage(expandMentions(text), atts.length > 0 ? atts : undefined);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
   }, [input, attachments, target, actions]);
 
@@ -428,8 +428,9 @@ export function ChatArea() {
     const pos = textarea.selectionStart ?? 0;
     const before = input.slice(0, pos).replace(/@([\w-]*)$/, "");
     const after = input.slice(pos);
-    const inserted =
-      selection === MENTION_ALL ? "@all " : `@[${selection.name}](${selection.id}) `;
+    // Insert the visible '@Name ' / '@all ' form. Send-time swap converts these
+    // to structured @[Name](id) mentions so the textarea stays human-readable.
+    const inserted = selection === MENTION_ALL ? "@all " : `@${selection.name} `;
     setInput(before + inserted + after);
     setMentionQuery(null);
     setMentionAnchor(null);
@@ -440,15 +441,23 @@ export function ChatArea() {
     });
   }
 
-  // Replace any literal `@all` token (not inside a structured @[...](...))
-  // with explicit @[Name](id) mentions for every team member, so the
-  // dispatcher's mention-parser fans out to the whole team.
-  function expandAllMentions(text: string): string {
+  // Convert visible mention forms to the structured @[Name](id) form the
+  // dispatcher expects, then expand any @all into the per-member fan-out.
+  function expandMentions(text: string): string {
     if (!targetTeam || teamAgents.length === 0) return text;
-    const expansion = teamAgents.map(a => `@[${a.name}](${a.id})`).join(" ");
-    // Match `@all` only as a standalone token (preceded by start/whitespace,
-    // followed by end/whitespace/punctuation) to avoid eating words like "@allies".
-    return text.replace(/(^|\s)@all(?=\s|$|[.,!?;:])/g, (_m, lead) => `${lead}${expansion}`);
+    let result = text;
+    // 1. @Name → @[Name](id). Sort by length desc so 'Nova-Pro' wins over 'Nova'.
+    const sorted = [...teamAgents].sort((a, b) => b.name.length - a.name.length);
+    for (const agent of sorted) {
+      // Escape regex metas in the name, then match it as a standalone @-token.
+      const escaped = agent.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(^|[^\\w@])@${escaped}(?=$|[^\\w-])`, "g");
+      result = result.replace(re, (_m, lead) => `${lead}@[${agent.name}](${agent.id})`);
+    }
+    // 2. @all → fan-out to every member.
+    const fanout = teamAgents.map(a => `@[${a.name}](${a.id})`).join(" ");
+    result = result.replace(/(^|\s)@all(?=\s|$|[.,!?;:])/g, (_m, lead) => `${lead}${fanout}`);
+    return result;
   }
 
   // No target selected — empty state
