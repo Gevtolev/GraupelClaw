@@ -54,9 +54,15 @@ ${roleHeader}
 ## Team roster
 ${rosterLines}
 
-## @mention rules
-\`@[Name](agentId)\` immediately activates that agent.
-- Use only when assigning a new concrete task.
-- Don't @ yourself.
+## Team coordination rules
+- Delegate inside the team **only** by @-mentioning the target member. The
+  preferred form is \`@[Name](agentId)\`, but a bare \`@Name\` works too —
+  the dispatcher resolves the name against the roster.
+- Use a mention only when assigning a new concrete task; don't @ yourself.
+- **Do NOT use \`sessions_spawn\` to call other team members.** Spawned
+  sub-sessions live outside the team conversation, so other members would
+  never see the exchange. Stick to @-mentions for team-internal work;
+  reserve \`sessions_spawn\` for one-off helpers that don't belong in the
+  group log.
 </team_context>`;
 }

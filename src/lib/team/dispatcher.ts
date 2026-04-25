@@ -24,7 +24,8 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
 
   const validIds = new Set(opts.team.agentIds);
   const tlId = resolveTlAgentId(opts.team);
-  const userMentions = parseMentions(opts.userContent, validIds);
+  const nameToId = buildNameToId(opts);
+  const userMentions = parseMentions(opts.userContent, validIds, nameToId);
 
   let currentTargets: string[] =
     userMentions.length > 0
@@ -61,7 +62,7 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
 
     for (const reply of replies) {
       if (!reply) continue;
-      const mentions = parseMentions(reply.content, validIds);
+      const mentions = parseMentions(reply.content, validIds, nameToId);
       for (const m of mentions) {
         if (m.agentId === reply.fromAgentId) continue;
         if (isRecentLoop(ctx.activatedChain, reply.fromAgentId, m.agentId)) {
@@ -166,4 +167,19 @@ function lastSpeakTs(messages: Message[], agentId: string): number | null {
     }
   }
   return max;
+}
+
+// Build a case-insensitive name → id map covering only the agents that
+// actually belong to this team. The parser uses this to resolve bare
+// `@Name` references back to a structured mention.
+function buildNameToId(opts: DispatchOpts): Map<string, string> {
+  const out = new Map<string, string>();
+  const teamIds = new Set(opts.team.agentIds);
+  const state = opts.getState();
+  for (const a of state.agents) {
+    if (!teamIds.has(a.id)) continue;
+    if (!a.name) continue;
+    out.set(a.name.toLowerCase(), a.id);
+  }
+  return out;
 }
