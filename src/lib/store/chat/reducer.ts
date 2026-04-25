@@ -4,6 +4,7 @@ import type { ChatSliceState, ChatAction } from "./types";
 export const initialChatState: ChatSliceState = {
   streamingStates: {},
   lastCascadeStatus: null,
+  activeTeamCascades: [],
 };
 
 export function chatReducer(
@@ -76,6 +77,15 @@ export function chatReducer(
         return { ...state, lastCascadeStatus: null };
       }
       return state;
+    case "BEGIN_TEAM_CASCADE":
+      if (state.activeTeamCascades.includes(action.conversationId)) return state;
+      return { ...state, activeTeamCascades: [...state.activeTeamCascades, action.conversationId] };
+    case "END_TEAM_CASCADE":
+      if (!state.activeTeamCascades.includes(action.conversationId)) return state;
+      return {
+        ...state,
+        activeTeamCascades: state.activeTeamCascades.filter(id => id !== action.conversationId),
+      };
     default:
       return state;
   }

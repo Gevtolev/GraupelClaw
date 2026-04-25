@@ -157,6 +157,7 @@ async function sendToTeam(
 
   deps.teamAbortedRef.current.set(conversationId, false);
   deps.dispatchChat({ type: "CLEAR_CASCADE_STATUS", conversationId });
+  deps.dispatchChat({ type: "BEGIN_TEAM_CASCADE", conversationId });
 
   const sendToAgentFn = async (
     agentId: string,
@@ -213,33 +214,37 @@ async function sendToTeam(
     return { fromAgentId: agentId, content: reply.content };
   };
 
-  await deps.dispatchTeamMessage({
-    team,
-    conversationId,
-    rootUserMessageId: userMsgId,
-    userContent: content,
-    attachments,
-    getState: () => {
-      const latestAgent = deps.getAgentState();
-      return {
-        agents: latestAgent.agents,
-        teams: latestAgent.teams,
-        messages: deps.getSessionState().messages,
-        agentIdentities: latestAgent.agentIdentities,
-      };
-    },
-    sendToAgent: sendToAgentFn,
-    isAborted: cid => deps.teamAbortedRef.current.get(cid) === true,
-    onCascadeStopped: ({ reason, hop }) => {
-      deps.dispatchChat({
-        type: "SET_CASCADE_STATUS",
-        status: { conversationId, reason, hop },
-      });
-    },
-    buildSessionKey: teamSessionKey,
-    maxHops: 8,
-  });
-  deps.teamAbortedRef.current.delete(conversationId);
+  try {
+    await deps.dispatchTeamMessage({
+      team,
+      conversationId,
+      rootUserMessageId: userMsgId,
+      userContent: content,
+      attachments,
+      getState: () => {
+        const latestAgent = deps.getAgentState();
+        return {
+          agents: latestAgent.agents,
+          teams: latestAgent.teams,
+          messages: deps.getSessionState().messages,
+          agentIdentities: latestAgent.agentIdentities,
+        };
+      },
+      sendToAgent: sendToAgentFn,
+      isAborted: cid => deps.teamAbortedRef.current.get(cid) === true,
+      onCascadeStopped: ({ reason, hop }) => {
+        deps.dispatchChat({
+          type: "SET_CASCADE_STATUS",
+          status: { conversationId, reason, hop },
+        });
+      },
+      buildSessionKey: teamSessionKey,
+      maxHops: 8,
+    });
+  } finally {
+    deps.dispatchChat({ type: "END_TEAM_CASCADE", conversationId });
+    deps.teamAbortedRef.current.delete(conversationId);
+  }
 }
 
 export async function abortStreaming(

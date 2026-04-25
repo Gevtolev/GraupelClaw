@@ -25,6 +25,10 @@ export interface CascadeStatus {
 export interface ChatSliceState {
   streamingStates: Record<string, StreamingState>;
   lastCascadeStatus: CascadeStatus | null;
+  /** Conversation ids that currently have a team cascade in flight. Set
+   * around the entire dispatchTeamMessage span so the UI can show a
+   * persistent "team coordinating" indicator across hop boundaries. */
+  activeTeamCascades: string[];
 }
 
 export type ChatAction =
@@ -47,4 +51,6 @@ export type ChatAction =
     }
   | { type: "CLEAR_STREAMING"; agentId: string }
   | { type: "SET_CASCADE_STATUS"; status: CascadeStatus }
-  | { type: "CLEAR_CASCADE_STATUS"; conversationId: string };
+  | { type: "CLEAR_CASCADE_STATUS"; conversationId: string }
+  | { type: "BEGIN_TEAM_CASCADE"; conversationId: string }
+  | { type: "END_TEAM_CASCADE"; conversationId: string };

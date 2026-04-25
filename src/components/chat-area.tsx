@@ -826,14 +826,18 @@ export function ChatArea() {
           );
         })}
 
-        {target?.type === "team" && streamingEntries.length > 0 && (
+        {target?.type === "team" &&
+         sessionState.activeConversationId &&
+         chatState.activeTeamCascades.includes(sessionState.activeConversationId) && (
           <div className="mx-auto mb-2 max-w-3xl px-4 text-center">
             <div className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
-              Dispatching to {streamingEntries.map(([id]) => {
-                const a = agentState.agents.find(x => x.id === id);
-                return a?.name ?? id;
-              }).join(", ")}
+              {streamingEntries.length > 0
+                ? `Dispatching to ${streamingEntries.map(([id]) => {
+                    const a = agentState.agents.find(x => x.id === id);
+                    return a?.name ?? id;
+                  }).join(", ")}`
+                : "Coordinating team response…"}
             </div>
           </div>
         )}

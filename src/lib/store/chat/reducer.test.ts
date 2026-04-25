@@ -6,7 +6,21 @@ describe("chatReducer", () => {
     expect(initialChatState).toEqual({
       streamingStates: {},
       lastCascadeStatus: null,
+      activeTeamCascades: [],
     });
+  });
+
+  it("BEGIN_TEAM_CASCADE adds the conversation; END removes it; both idempotent", () => {
+    const s1 = chatReducer(initialChatState, { type: "BEGIN_TEAM_CASCADE", conversationId: "c1" });
+    expect(s1.activeTeamCascades).toEqual(["c1"]);
+    const s2 = chatReducer(s1, { type: "BEGIN_TEAM_CASCADE", conversationId: "c1" });
+    expect(s2).toBe(s1);
+    const s3 = chatReducer(s1, { type: "BEGIN_TEAM_CASCADE", conversationId: "c2" });
+    expect(s3.activeTeamCascades).toEqual(["c1", "c2"]);
+    const s4 = chatReducer(s3, { type: "END_TEAM_CASCADE", conversationId: "c1" });
+    expect(s4.activeTeamCascades).toEqual(["c2"]);
+    const s5 = chatReducer(s4, { type: "END_TEAM_CASCADE", conversationId: "missing" });
+    expect(s5).toBe(s4);
   });
 
   it("SET_STREAMING isStreaming=true creates a fresh entry with 'connecting' phase", () => {
