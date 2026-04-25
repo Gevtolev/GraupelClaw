@@ -64,7 +64,8 @@ function makeDeps(opts: {
       sendMessage: (k: string, t: string, u: undefined, a?: unknown) => Promise<void>;
       abortChat: (k: string) => Promise<void>;
     } | null>,
-    pendingResolvers: new Map<string, () => void>(),
+    pendingResolvers: new Map<string, (reply: { content: string } | null) => void>(),
+    pendingFinalContent: new Map<string, string>(),
     teamAbortedRef: { current: new Map<string, boolean>() },
     dbAddMessage: vi.fn(async () => {}),
     dbUpdateConversation: vi.fn(async () => {}),

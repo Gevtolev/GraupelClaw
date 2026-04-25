@@ -52,7 +52,8 @@ function makeDeps(opts: {
     dispatchChat: vi.fn(),
     dispatchSession: vi.fn(),
     dbAddMessage: vi.fn(async () => {}),
-    pendingResolvers: new Map<string, () => void>(),
+    pendingResolvers: new Map<string, (reply: { content: string } | null) => void>(),
+    pendingFinalContent: new Map<string, string>(),
     idFactory: () => "new-msg-id",
   };
 }
@@ -163,16 +164,56 @@ describe("handleGatewayChatEvent", () => {
     expect(deps.dbAddMessage).toHaveBeenCalled();
   });
 
-  it("final: clears streaming + resolves pending resolver", () => {
+  it("final: clears streaming + resolves pending resolver with last final content", () => {
     const resolver = vi.fn();
     const pending = new Map([["a1", resolver]]);
-    const deps = { ...makeDeps({ streamingStates: { a1: streaming() } }), pendingResolvers: pending };
+    const finals = new Map([["a1", "hello world"]]);
+    const deps = {
+      ...makeDeps({ streamingStates: { a1: streaming() } }),
+      pendingResolvers: pending,
+      pendingFinalContent: finals,
+    };
     handleGatewayChatEvent(payload("final"), deps);
     expect(deps.dispatchChat).toHaveBeenCalledWith(
       expect.objectContaining({ type: "SET_STREAMING", isStreaming: false, agentId: "a1" }),
     );
-    expect(resolver).toHaveBeenCalled();
+    expect(resolver).toHaveBeenCalledWith({ content: "hello world" });
     expect(pending.has("a1")).toBe(false);
+    expect(finals.has("a1")).toBe(false);
+  });
+
+  it("final: resolves with null if no message_done captured content", () => {
+    const resolver = vi.fn();
+    const pending = new Map([["a1", resolver]]);
+    const deps = {
+      ...makeDeps({ streamingStates: { a1: streaming() } }),
+      pendingResolvers: pending,
+    };
+    handleGatewayChatEvent(payload("final"), deps);
+    expect(resolver).toHaveBeenCalledWith(null);
+  });
+
+  it("message_done: stores latest text in pendingFinalContent for the resolver", () => {
+    const conv: Conversation = {
+      id: "conv-1", targetType: "agent", targetId: "a1", companyId: "c1",
+      title: "t", createdAt: 0, updatedAt: 0,
+    };
+    const deps = makeDeps({
+      streamingStates: { a1: streaming() },
+      conversations: [conv],
+      activeConversationId: "conv-1",
+    });
+    const p = payload("message_done", {
+      message: { role: "assistant", content: [{ type: "text", text: "first chunk" }], timestamp: 1 },
+    });
+    handleGatewayChatEvent(p, deps);
+    expect(deps.pendingFinalContent.get("a1")).toBe("first chunk");
+    // A second message_done overwrites (model output advanced)
+    const p2 = payload("message_done", {
+      message: { role: "assistant", content: [{ type: "text", text: "final answer" }], timestamp: 2 },
+    });
+    handleGatewayChatEvent(p2, deps);
+    expect(deps.pendingFinalContent.get("a1")).toBe("final answer");
   });
 
   it("error [local]: adds error message via dbAddMessage + dispatches ADD_MESSAGE + clears streaming", async () => {

@@ -11,11 +11,14 @@ import React, {
 import { chatReducer, initialChatState } from "./reducer";
 import type { ChatSliceState, ChatAction } from "./types";
 
+export type PendingStreamResolver = (reply: { content: string } | null) => void;
+
 export interface ChatStoreValue {
   state: ChatSliceState;
   dispatch: React.Dispatch<ChatAction>;
   getState: () => ChatSliceState;
-  pendingStreamResolvers: React.MutableRefObject<Map<string, () => void>>;
+  pendingStreamResolvers: React.MutableRefObject<Map<string, PendingStreamResolver>>;
+  pendingFinalContent: React.MutableRefObject<Map<string, string>>;
   teamAbortedRef: React.MutableRefObject<Map<string, boolean>>;
 }
 
@@ -28,11 +31,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const getState = useCallback(() => stateRef.current, []);
 
-  const pendingStreamResolvers = useRef<Map<string, () => void>>(new Map());
+  const pendingStreamResolvers = useRef<Map<string, PendingStreamResolver>>(new Map());
+  const pendingFinalContent = useRef<Map<string, string>>(new Map());
   const teamAbortedRef = useRef<Map<string, boolean>>(new Map());
 
   const value = useMemo<ChatStoreValue>(
-    () => ({ state, dispatch, getState, pendingStreamResolvers, teamAbortedRef }),
+    () => ({ state, dispatch, getState, pendingStreamResolvers, pendingFinalContent, teamAbortedRef }),
     [state, getState],
   );
 

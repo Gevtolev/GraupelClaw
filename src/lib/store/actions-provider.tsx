@@ -88,6 +88,7 @@ export function ActionsProvider({ children }: { children: React.ReactNode }) {
         dispatchSession: session.dispatch,
         dbAddMessage,
         pendingResolvers: chat.pendingStreamResolvers.current,
+        pendingFinalContent: chat.pendingFinalContent.current,
         idFactory: () => uuidv4(),
       });
     });
@@ -311,6 +312,7 @@ export function ActionsProvider({ children }: { children: React.ReactNode }) {
         dispatchChat: chat.dispatch,
         clientRef: gateway.clientRef,
         pendingResolvers: chat.pendingStreamResolvers.current,
+        pendingFinalContent: chat.pendingFinalContent.current,
         teamAbortedRef: chat.teamAbortedRef,
         dbAddMessage,
         dbUpdateConversation,
@@ -333,6 +335,7 @@ export function ActionsProvider({ children }: { children: React.ReactNode }) {
       dispatchChat: chat.dispatch,
       clientRef: gateway.clientRef,
       pendingResolvers: chat.pendingStreamResolvers.current,
+      pendingFinalContent: chat.pendingFinalContent.current,
       teamAbortedRef: chat.teamAbortedRef,
       dbAddMessage,
       dbUpdateConversation,

@@ -2,13 +2,22 @@ import type { ChatEventPayload, Message } from "@/types";
 import type { ChatSliceState, ChatAction } from "@/lib/store/chat/types";
 import type { SessionState, SessionAction } from "@/lib/store/session/types";
 
+export type PendingResolver = (reply: { content: string } | null) => void;
+
 export interface GatewayEventsDeps {
   getChatState: () => ChatSliceState;
   getSessionState: () => SessionState;
   dispatchChat: (a: ChatAction) => void;
   dispatchSession: (a: SessionAction) => void;
   dbAddMessage: (m: Message) => Promise<unknown>;
-  pendingResolvers: Map<string, () => void>;
+  /** Per-agent resolvers awaited by the team dispatcher. Resolved with the
+   * agent's final reply text on `final`, or `null` on `error`/`aborted`. */
+  pendingResolvers: Map<string, PendingResolver>;
+  /** Per-agent latest non-empty content from message_done events. Updated as
+   * the agent streams; read by the resolver on `final` so the dispatcher
+   * doesn't have to re-read from React state (which may be stale across the
+   * microtask boundary). */
+  pendingFinalContent: Map<string, string>;
   idFactory: () => string;
 }
 
@@ -71,6 +80,13 @@ export function handleGatewayChatEvent(
         if (shouldPersistLocal) {
           deps.dbAddMessage(msg);
         }
+        // Capture the latest text content for the team dispatcher's resolver.
+        // Multiple message_done events can fire within one turn (thinking →
+        // tool call → final answer); we keep overwriting so the last one
+        // (the agent's actual response) wins.
+        if (doneText) {
+          deps.pendingFinalContent.set(agentId, doneText);
+        }
       }
       deps.dispatchChat({
         type: "SET_STREAMING_CONTENT",
@@ -93,7 +109,12 @@ export function handleGatewayChatEvent(
       const resolver = deps.pendingResolvers.get(agentId);
       if (resolver) {
         deps.pendingResolvers.delete(agentId);
-        resolver();
+        const content = deps.pendingFinalContent.get(agentId);
+        deps.pendingFinalContent.delete(agentId);
+        resolver(content ? { content } : null);
+      } else {
+        // No waiter — clean up any captured content to avoid leaks.
+        deps.pendingFinalContent.delete(agentId);
       }
       return;
     }
@@ -124,7 +145,10 @@ export function handleGatewayChatEvent(
       const resolver = deps.pendingResolvers.get(agentId);
       if (resolver) {
         deps.pendingResolvers.delete(agentId);
-        resolver();
+        deps.pendingFinalContent.delete(agentId);
+        resolver(null);
+      } else {
+        deps.pendingFinalContent.delete(agentId);
       }
       return;
     }
@@ -155,7 +179,10 @@ export function handleGatewayChatEvent(
       const resolver = deps.pendingResolvers.get(agentId);
       if (resolver) {
         deps.pendingResolvers.delete(agentId);
-        resolver();
+        deps.pendingFinalContent.delete(agentId);
+        resolver(null);
+      } else {
+        deps.pendingFinalContent.delete(agentId);
       }
       return;
     }

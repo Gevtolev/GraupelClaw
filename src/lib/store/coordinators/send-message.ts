@@ -20,7 +20,8 @@ export interface SendMessageDeps {
   dispatchSession: (a: SessionAction) => void;
   dispatchChat: (a: ChatAction) => void;
   clientRef: React.MutableRefObject<MinimalClient | null>;
-  pendingResolvers: Map<string, () => void>;
+  pendingResolvers: Map<string, (reply: { content: string } | null) => void>;
+  pendingFinalContent: Map<string, string>;
   teamAbortedRef: React.MutableRefObject<Map<string, boolean>>;
   dbAddMessage: (m: Message) => Promise<unknown>;
   dbUpdateConversation: (id: string, updates: Partial<Conversation>) => Promise<unknown>;
@@ -174,21 +175,25 @@ async function sendToTeam(
       sessionKey,
       isStreaming: true,
     });
-    const streamDone = Promise.race([
-      new Promise<void>(resolve => {
+    // The resolver passes back the agent's final reply content directly so we
+    // don't have to query React state right after the gateway "final" event —
+    // stateRef may not have been updated by the next render yet.
+    const streamDone: Promise<{ content: string } | null> = Promise.race([
+      new Promise<{ content: string } | null>(resolve => {
         deps.pendingResolvers.set(agentId, resolve);
       }),
-      new Promise<void>(resolve =>
+      new Promise<{ content: string } | null>(resolve =>
         setTimeout(() => {
           deps.pendingResolvers.delete(agentId);
-          resolve();
+          deps.pendingFinalContent.delete(agentId);
+          resolve(null);
         }, STREAM_TIMEOUT),
       ),
     ]);
-    const sinceTs = Date.now();
+    let reply: { content: string } | null;
     try {
       await client.sendMessage(sessionKey, text, undefined, atts);
-      await streamDone;
+      reply = await streamDone;
     } catch {
       deps.dispatchChat({
         type: "SET_STREAMING",
@@ -201,15 +206,6 @@ async function sendToTeam(
       return null;
     }
 
-    const latestSession = deps.getSessionState();
-    const reply = [...latestSession.messages].reverse().find(
-      m =>
-        m.role === "assistant" &&
-        m.agentId === agentId &&
-        m.targetId === target.id &&
-        m.conversationId === conversationId &&
-        m.createdAt > sinceTs,
-    );
     if (!reply) return null;
     return { fromAgentId: agentId, content: reply.content };
   };
@@ -270,7 +266,8 @@ export async function abortStreaming(
     const resolver = deps.pendingResolvers.get(agentId);
     if (resolver) {
       deps.pendingResolvers.delete(agentId);
-      resolver();
+      deps.pendingFinalContent.delete(agentId);
+      resolver(null);
     }
   }
 }
