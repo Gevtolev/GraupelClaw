@@ -173,7 +173,13 @@ function preprocessContent(content: string, agentId?: string): string {
 
 const MEDIA_MARKER_RE = /%%MEDIA\|(audio|video|file)\|([^|]+)\|((?:[^%]|%(?!%))*)%%/g;
 
-export function MarkdownRenderer({ content, agentId, teamAgentMap }: { content: string; agentId?: string; teamAgentMap?: Map<string, string> }) {
+interface MarkdownRendererProps {
+  content: string;
+  agentId?: string;
+  teamAgentMap?: Map<string, string>;
+}
+
+function MarkdownRendererInner({ content, agentId, teamAgentMap }: MarkdownRendererProps) {
   const processed = preprocessContent(content, agentId);
 
   // Split content by media markers and render each segment
@@ -213,6 +219,18 @@ export function MarkdownRenderer({ content, agentId, teamAgentMap }: { content: 
 
   return <>{parts}</>;
 }
+
+// Memo: skip the heavy ReactMarkdown re-parse when content/agentId/teamAgentMap
+// haven't changed. Critical when the parent (e.g. ChatArea) re-renders on
+// every keystroke in the input — without this, every chat message gets
+// re-parsed each character the user types.
+export const MarkdownRenderer = React.memo(
+  MarkdownRendererInner,
+  (a, b) =>
+    a.content === b.content &&
+    a.agentId === b.agentId &&
+    a.teamAgentMap === b.teamAgentMap,
+);
 
 function MarkdownSegment({ content, teamAgentMap }: { content: string; teamAgentMap?: Map<string, string> }) {
   return (

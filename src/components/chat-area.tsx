@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   Bot,
   Send,
@@ -239,12 +239,23 @@ export function ChatArea() {
   const isConnected = gatewayState.connectionStatus === "connected";
   const userProfile = loadUserProfile();
 
-  // Auto-open sessions panel when an Agent is selected
+  // Auto-open sessions panel only when the selected agent has no active
+  // session yet. If a session is already selected, jump straight into the
+  // chat instead of forcing a session picker.
+  // Wait for native sessions to finish loading because SET_CHAT_TARGET does
+  // not clear activeConversationId — reading it before the fetch settles
+  // would see the previous agent's session.
   useEffect(() => {
-    if (target?.type === "agent") {
-      setShowConvPanel(true);
-    }
-  }, [target?.type, target?.id]);
+    if (target?.type !== "agent") return;
+    if (sessionState.nativeSessionsLoading) return;
+    if (sessionState.activeConversationId) return;
+    setShowConvPanel(true);
+  }, [
+    target?.type,
+    target?.id,
+    sessionState.nativeSessionsLoading,
+    sessionState.activeConversationId,
+  ]);
 
   // Get chat target info
   const targetAgent = target?.type === "agent"
@@ -253,16 +264,25 @@ export function ChatArea() {
   const targetTeam = target?.type === "team"
     ? agentState.teams.find((t) => t.id === target.id)
     : null;
-  const teamAgents = targetTeam
-    ? agentState.agents.filter((a) => targetTeam.agentIds.includes(a.id))
-    : [];
-  const tlAgentId = targetTeam ? resolveTlAgentId(targetTeam) : null;
+  // Memoized so the identity is stable across keystrokes in the input. Without
+  // useMemo a new array/Map would be allocated every render and break
+  // React.memo on MarkdownRenderer / message bubble children, forcing each
+  // chat message to re-parse markdown on every keystroke.
+  const teamAgents = useMemo(
+    () => (targetTeam ? agentState.agents.filter((a) => targetTeam.agentIds.includes(a.id)) : []),
+    [targetTeam, agentState.agents],
+  );
+  const tlAgentId = useMemo(
+    () => (targetTeam ? resolveTlAgentId(targetTeam) : null),
+    [targetTeam],
+  );
   // id → live name lookup for mention chips. Built from teamAgents (already
   // filters orphans) so stale @mentions in older messages render as plain text
   // instead of leaking raw ids into chips.
-  const teamAgentMap = targetTeam
-    ? new Map(teamAgents.map((a) => [a.id, a.name] as const))
-    : undefined;
+  const teamAgentMap = useMemo(
+    () => (targetTeam ? new Map(teamAgents.map((a) => [a.id, a.name] as const)) : undefined),
+    [targetTeam, teamAgents],
+  );
 
   // Streaming entries for current chat target
   const streamingEntries = Object.entries(chatState.streamingStates).filter(
