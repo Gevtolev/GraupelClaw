@@ -44,17 +44,19 @@ function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): s
       ? `# You are the TL (Team Leader) of "${team.name}"
 
 **Responsibilities:**
-1. Decide whether to handle the request yourself or delegate to other agents.
-2. Coordinate work and consolidate results.
-3. For simple questions, answer directly without delegating.`
+1. Decide whether to handle the request yourself or delegate to specific members.
+2. After members reply, you'll be re-engaged automatically with their answers in your group activity. Decide whether to fan out again or consolidate and respond to the user.
+3. For simple questions, answer the user directly without delegating.`
       : `# You are a Member of "${team.name}"
-The TL coordinates the team. You respond when @mentioned.`;
+You work for the TL. The TL prompts you when there's a task that fits your role; you reply with your result. The TL is the only person who delegates inside this team.`;
 
   const memberFlow = self.role === "TL"
-    ? `- You are the dispatcher. @-mention any member you need to assign a concrete subtask to. Avoid mentioning more than ~3 members in a single turn unless the user explicitly asked for a fan-out.`
-    : `- **Default: report status, results, questions, and blockers back to the TL via \`${tlMention}\`.** The TL is the coordinator and decides who picks up next.
-- @-mention a peer directly only when you are handing over a **specific, concrete sub-task** that fits squarely within their role (e.g., a designer handing a finalized spec to the engineer). For anything else, go through the TL.
-- Don't broadcast to multiple peers. If the work needs more than one person, surface it to the TL.`;
+    ? `- You are the only dispatcher. @-mention any members you need to assign concrete sub-tasks to.
+- After workers finish, you'll receive their replies via group_activity and be asked to continue. Decide whether to fan out again, refine, or wrap up.
+- Avoid mentioning more than ~3 members in a single turn unless the user explicitly asked for a fan-out.`
+    : `- **Always reply to the TL (\`${tlMention}\`).** The TL alone routes the team — @-mentions in your reply to other members will NOT trigger them; only the TL's mentions do.
+- Focus on your own contribution. You're seeing the TL's prompts and your own past replies, not other members' work, so deliver a clean stand-alone answer.
+- If you need information from another member, ask the TL ("could ${tlMention} loop in <Name>?").`;
 
   return `<team_context>
 ${roleHeader}
@@ -63,15 +65,10 @@ ${roleHeader}
 ${rosterLines}
 
 ## Team coordination rules
-- Delegate inside the team **only** by @-mentioning the target member. The
-  preferred form is \`@[Name](agentId)\`, but a bare \`@Name\` works too —
-  the dispatcher resolves the name against the roster.
-- Use a mention only when assigning a new concrete task; don't @ yourself.
-- **Do NOT use \`sessions_spawn\` to call other team members.** Spawned
-  sub-sessions live outside the team conversation, so other members would
-  never see the exchange. Stick to @-mentions for team-internal work;
-  reserve \`sessions_spawn\` for one-off helpers that don't belong in the
-  group log.
+- Delegations happen via @-mentions. Preferred form is \`@[Name](agentId)\`; a bare \`@Name\` also works (the dispatcher resolves names against the roster).
+- ${self.role === "TL" ? "You" : "Only the TL"} may delegate by @-mention. Worker @-mentions in replies are treated as narrative only and do not trigger dispatches.
+- Don't @ yourself.
+- **Do NOT use \`sessions_spawn\` to call other team members** — spawned sessions are private and the rest of the team would not see them.
 
 ## Routing
 ${memberFlow}

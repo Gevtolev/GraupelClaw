@@ -34,6 +34,10 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       ? [tlId]
       : [];
   let isUserHop = true;
+  // True once any hop has dispatched the TL — used to decide whether to auto
+  // re-engage the TL after a worker fan-out. If the user directly @-ed
+  // workers and bypassed the TL, we respect that and don't pull TL in.
+  let tlEverDispatched = tlId !== undefined && currentTargets.includes(tlId);
 
   console.debug(
     "[team-dispatcher] start conv", ctx.conversationId,
@@ -65,16 +69,24 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     const nextTargets: string[] = [];
     const seen = new Set<string>();
     let loopDetected = false;
+    let workerReplied = false;
 
     for (const reply of replies) {
       if (!reply) {
         console.debug("[team-dispatcher] hop", ctx.hop, "got null reply (sendToAgent failed or no message saved)");
         continue;
       }
-      const mentions = parseMentions(reply.content, validIds, nameToId);
+      // Hub-and-spoke routing: only the TL's mentions form next-hop dispatches.
+      // A worker's reply may contain @-mentions for narrative purposes (e.g.,
+      // "I synced with @Luna already") but those don't trigger another hop.
+      // Workers report up to the TL; the TL decides who to delegate to next.
+      const fromIsTl = tlId !== undefined && reply.fromAgentId === tlId;
+      if (!fromIsTl) workerReplied = true;
+      const mentions = fromIsTl ? parseMentions(reply.content, validIds, nameToId) : [];
       console.debug(
         "[team-dispatcher] hop", ctx.hop,
         "parsed", mentions.length, "mentions from", reply.fromAgentId,
+        fromIsTl ? "(TL)" : "(worker — mentions ignored for routing)",
         "(content len:", reply.content.length, ")",
         mentions.map(m => `@${m.name}(${m.agentId})`).join(" "),
       );
@@ -90,6 +102,31 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
         ctx.activatedEdges.push({ from: reply.fromAgentId, to: m.agentId });
       }
     }
+
+    // After a worker fan-out completes, auto re-engage the TL so it can read
+    // the workers' replies (via group_activity) and decide whether to fan
+    // out again or wrap up. The TL's own self-mention filter prevents an
+    // infinite TL→TL chain; if the TL has nothing more to delegate it will
+    // simply respond and the cascade ends naturally.
+    if (
+      !loopDetected &&
+      nextTargets.length === 0 &&
+      workerReplied &&
+      tlId !== undefined &&
+      tlEverDispatched &&
+      !currentTargets.includes(tlId)
+    ) {
+      nextTargets.push(tlId);
+      // Edge bookkeeping: model the auto re-engage as worker→TL so the loop
+      // detector still tracks the cascade shape.
+      for (const reply of replies) {
+        if (reply && reply.fromAgentId !== tlId) {
+          ctx.activatedEdges.push({ from: reply.fromAgentId, to: tlId });
+        }
+      }
+      console.debug("[team-dispatcher] hop", ctx.hop, "auto re-engaging TL", tlId);
+    }
+
     console.debug(
       "[team-dispatcher] hop", ctx.hop, "→", ctx.hop + 1,
       "nextTargets:", nextTargets,
@@ -101,6 +138,9 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       return;
     }
 
+    if (tlId !== undefined && nextTargets.includes(tlId)) {
+      tlEverDispatched = true;
+    }
     currentTargets = nextTargets;
   }
 
@@ -130,14 +170,23 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
       m.conversationId === ctx.conversationId,
   );
 
+  const tlId = resolveTlAgentId(team);
   const lastSelfTs = lastSpeakTs(teamMessages, agentId);
   const triggerTs = Date.now();
   const nameMap = new Map<string, string>();
   for (const a of state.agents) nameMap.set(a.id, a.name);
 
-  const groupActivity = buildGroupActivity(teamMessages, lastSelfTs, triggerTs, nameMap);
-
-  const tlId = resolveTlAgentId(team);
+  // Workers see an isolated slice of group activity: only the TL's prompts and
+  // their own replies. Other members' work stays out of their context so we
+  // don't compound noise across parallel fan-out. The TL keeps full visibility
+  // (everyone's messages + the user) so it can orchestrate.
+  const isTlSelf = agentId === tlId;
+  const visibleMessages = isTlSelf
+    ? teamMessages
+    : teamMessages.filter(m =>
+        m.role === "user" || m.agentId === tlId || m.agentId === agentId,
+      );
+  const groupActivity = buildGroupActivity(visibleMessages, lastSelfTs, triggerTs, nameMap);
   const selfAgent = state.agents.find(a => a.id === agentId);
   const selfName = selfAgent?.name ?? agentId;
   const self = {
