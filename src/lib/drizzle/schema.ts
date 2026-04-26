@@ -43,6 +43,7 @@ export const teams = sqliteTable("teams", {
   description: text("description"),
   agentIds: text("agent_ids").notNull().default("[]"),
   tlAgentId: text("tl_agent_id"),
+  workspaceRoot: text("workspace_root"),
   createdAt: integer("created_at").notNull(),
 });
 

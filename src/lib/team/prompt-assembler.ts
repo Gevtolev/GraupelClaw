@@ -49,11 +49,22 @@ function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): s
       : `# You are a Member of "${team.name}"
 The TL coordinates the team. You respond when @-mentioned. You can also @-mention teammates if you have a concrete sub-task to hand off, but prefer reporting up to the TL.`;
 
+  const workspaceBlock = team.workspaceRoot
+    ? `
+
+## Team workspace
+Shared folder: \`${team.workspaceRoot}\`
+All team files (research, drafts, code, output) belong here. Use absolute
+paths when reading/writing. Do not write outside this folder unless the user
+explicitly asks. The folder also contains a \`.graupelclaw-workspace.json\`
+marker you can inspect for team metadata.`
+    : "";
+
   return `<team_context>
 ${roleHeader}
 
 ## Team roster
-${rosterLines}
+${rosterLines}${workspaceBlock}
 
 ## @mention protocol
 - \`@[Name](agentId)\` is a **trigger** — it activates that agent for the next hop. A bare \`@Name\` works too (the dispatcher resolves names against the roster).

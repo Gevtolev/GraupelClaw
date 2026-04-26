@@ -104,6 +104,13 @@ export interface AgentTeam {
   description?: string;
   agentIds: string[];
   tlAgentId?: string | null;
+  /**
+   * Absolute filesystem path on the user's machine that this team uses as a
+   * shared workspace. Agents read/write artifacts here via their existing
+   * OpenClaw file tools. Optional — when undefined, the team has no shared
+   * workspace and agents fall back to their per-agent OpenClaw workspaces.
+   */
+  workspaceRoot?: string;
   createdAt: number;
 }
 

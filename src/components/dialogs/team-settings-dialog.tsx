@@ -20,17 +20,19 @@ import { useAgentStore, useActions } from "@/lib/store";
 import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import {
-  Users, UserPlus, Wrench, Trash2, ChevronRight, Check, X, Crown,
+  Users, UserPlus, Wrench, Trash2, ChevronRight, Check, X, Crown, FolderOpen,
 } from "lucide-react";
 import { AvatarPicker } from "@/components/avatar-picker";
+import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { resolveTlAgentId } from "@/lib/team";
 import type { AgentTeam } from "@/types";
 
-type Section = "general" | "members" | "advanced";
+type Section = "general" | "members" | "workspace" | "advanced";
 
 const sections: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "general", label: "General", icon: Users },
   { id: "members", label: "Members", icon: UserPlus },
+  { id: "workspace", label: "Workspace", icon: FolderOpen },
   { id: "advanced", label: "Advanced", icon: Wrench },
 ];
 
@@ -54,6 +56,9 @@ export function TeamSettingsDialog({
   );
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [workspaceRoot, setWorkspaceRoot] = useState<string | undefined>(team.workspaceRoot);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   const companyAgents = agentStore.state.agents.filter((a) => a.companyId === team.companyId);
   const effectiveTeam: AgentTeam = {
@@ -314,6 +319,54 @@ export function TeamSettingsDialog({
                 </div>
               )}
 
+              {activeSection === "workspace" && (
+                <div className="space-y-5">
+                  <div>
+                    <Label>Team workspace folder</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      A local folder where this team&apos;s agents read and write
+                      shared files (research, drafts, code, output). Agents
+                      use absolute paths via their existing OpenClaw file
+                      tools.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase text-muted-foreground">Path</Label>
+                    <code className="block rounded-md bg-muted px-3 py-2 text-sm font-mono break-all">
+                      {workspaceRoot ?? "(not set)"}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={() => setPickerOpen(true)} variant="default">
+                      <FolderOpen className="h-4 w-4 mr-2" />
+                      {workspaceRoot ? "Change folder…" : "Set up workspace…"}
+                    </Button>
+                    {workspaceRoot && (
+                      <Button
+                        variant="ghost"
+                        onClick={async () => {
+                          setWorkspaceRoot(undefined);
+                          setWorkspaceError(null);
+                          await agentStore.updateTeam(team.id, { workspaceRoot: undefined });
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  {workspaceError && (
+                    <p className="text-sm text-destructive">{workspaceError}</p>
+                  )}
+                  <Separator />
+                  <p className="text-xs text-muted-foreground">
+                    Tip: pick a folder under <code>~/Documents/</code> so the
+                    agents&apos; output is easy to find. The folder must be
+                    inside your home directory and outside any agent&apos;s
+                    private OpenClaw workspace.
+                  </p>
+                </div>
+              )}
+
               {activeSection === "advanced" && (
                 <div className="space-y-5">
                   <div>
@@ -361,6 +414,31 @@ export function TeamSettingsDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <FolderPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        defaultPath={workspaceRoot}
+        onSelect={async (chosen) => {
+          setWorkspaceRoot(chosen);
+          setWorkspaceError(null);
+          try {
+            await agentStore.updateTeam(team.id, { workspaceRoot: chosen });
+            // Best-effort marker file write so the agent (and the user) can
+            // identify the folder later. Non-fatal if it fails.
+            await fetch("/api/teams/workspace/marker", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                teamId: team.id,
+                teamName: team.name,
+                workspaceRoot: chosen,
+              }),
+            }).catch(() => {});
+          } catch (e) {
+            setWorkspaceError(e instanceof Error ? e.message : "could not save");
+          }
+        }}
+      />
     </Dialog>
   );
 }
