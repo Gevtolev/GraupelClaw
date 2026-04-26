@@ -22,7 +22,18 @@ export interface AssembleOpts {
 
 const RECENT_DECISIONS_MAX_CHARS = 600;
 
-export function assembleAgentPrompt(opts: AssembleOpts): string {
+export interface AssembledPrompt {
+  /** Stable team-level context: role header, roster, workspace path,
+   * recent decisions, @mention protocol, sessions_spawn guidance, identity
+   * protection, and the four behavioral protocol XML blocks.
+   * Sent via OpenClaw's `extraSystemPrompt` channel — does not enter chat history. */
+  systemPrompt: string;
+  /** Per-turn dynamic content: active_tasks, group_activity, user text,
+   * "you were mentioned" trailer. Sent as a normal user message. */
+  userPrompt: string;
+}
+
+export function assembleAgentPrompt(opts: AssembleOpts): AssembledPrompt {
   const teamContext = buildTeamContext(
     opts.team,
     opts.roster,
@@ -30,14 +41,17 @@ export function assembleAgentPrompt(opts: AssembleOpts): string {
     opts.recentDecisions,
   );
   const protocols = buildGlobalProtocols();
-  const activity = opts.groupActivity ?? "";
-  const tasks = opts.activeTasks ?? "";
+  const systemPrompt = [teamContext, protocols].filter(Boolean).join("\n\n");
+
   const trailer = opts.isDirectMention
     ? ""
     : `\n\nYou (${opts.self.name}) were mentioned in the group conversation. Please respond to the discussion.`;
   const tail = (opts.userText + trailer).trim();
+  const userPrompt = [opts.activeTasks ?? "", opts.groupActivity ?? "", tail]
+    .filter(Boolean)
+    .join("\n\n");
 
-  return [teamContext, protocols, tasks, activity, tail].filter(Boolean).join("\n\n");
+  return { systemPrompt, userPrompt };
 }
 
 function buildTeamContext(
