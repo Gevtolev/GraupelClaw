@@ -56,3 +56,5 @@ REQUIREMENTS.md
 
 # Screenshots (local-only, not versioned)
 /docs/screenshot/
+tools/gpw/node_modules/
+tools/gpw/dist/

@@ -4,7 +4,9 @@ import { buildGroupActivity } from "./group-activity";
 import { assembleAgentPrompt } from "./prompt-assembler";
 import { resolveTlAgentId } from "./resolve-tl";
 import { isRecentLoop } from "./loop-detector";
+import { renderActiveTasks } from "./team-tasks/parser";
 import type {
+  ActiveTaskSummary,
   CascadeContext,
   DispatchOpts,
   DispatchReply,
@@ -53,11 +55,55 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     }
 
     console.debug("[team-dispatcher] dispatching hop", ctx.hop, "to", currentTargets, "isUserHop:", isUserHop);
+    if (opts.onTaskEvent) {
+      for (const id of currentTargets) {
+        opts.onTaskEvent({
+          type: "dispatch_start",
+          agentId: id,
+          conversationId: ctx.conversationId,
+        });
+      }
+    }
+
+    // Fetch fresh task snapshot for this hop (post dispatch_start so any
+    // status changes have settled).
+    let activeTasks: ActiveTaskSummary[] | undefined;
+    if (opts.fetchActiveTasks) {
+      try {
+        activeTasks = await opts.fetchActiveTasks();
+      } catch (e) {
+        console.debug("[team-dispatcher] fetchActiveTasks failed", e);
+      }
+    }
+
     const replies = await Promise.all(
       currentTargets.map(agentId =>
-        dispatchOne({ agentId, ctx, opts, isUserHop }),
+        dispatchOne({ agentId, ctx, opts, isUserHop, activeTasks }),
       ),
     );
+
+    // Emit reply_complete / reply_empty events for the task hook before we
+    // parse mentions for the next-hop decision.
+    if (opts.onTaskEvent) {
+      for (let i = 0; i < currentTargets.length; i++) {
+        const agentId = currentTargets[i];
+        const reply = replies[i];
+        if (!reply || !reply.content) {
+          opts.onTaskEvent({
+            type: "reply_empty",
+            agentId,
+            conversationId: ctx.conversationId,
+          });
+        } else {
+          opts.onTaskEvent({
+            type: "reply_complete",
+            agentId,
+            conversationId: ctx.conversationId,
+            content: reply.content,
+          });
+        }
+      }
+    }
 
     ctx.hop += 1;
     isUserHop = false;
@@ -128,10 +174,11 @@ interface DispatchOneArgs {
   ctx: CascadeContext;
   opts: DispatchOpts;
   isUserHop: boolean;
+  activeTasks?: ActiveTaskSummary[];
 }
 
 async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null> {
-  const { agentId, ctx, opts, isUserHop } = args;
+  const { agentId, ctx, opts, isUserHop, activeTasks } = args;
   const state = opts.getState();
   const team = state.teams.find(t => t.id === opts.team.id) ?? opts.team;
 
@@ -181,6 +228,29 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
   );
   const isDirectMention = isUserHop && userMentions.some(m => m.agentId === agentId);
 
+  // Build per-agent active-tasks block. "Mine" = tasks assigned to this
+  // agent (any active status). "Other count" = team-wide active tasks where
+  // I'm NOT the assignee.
+  let activeTasksRendered: string | null = null;
+  if (activeTasks && activeTasks.length > 0) {
+    const isActive = (s: string) =>
+      s === "in_progress" || s === "pending" || s === "blocked";
+    const mine = activeTasks
+      .filter(t => t.assignee === agentId && isActive(t.status))
+      .slice(0, 10)
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        blockedReason: t.blockedReason,
+      }));
+    const otherActiveCount = activeTasks.filter(
+      t => t.assignee !== agentId && isActive(t.status),
+    ).length;
+    activeTasksRendered = renderActiveTasks({ myTasks: mine, otherActiveCount });
+  }
+
   const prompt = assembleAgentPrompt({
     team,
     roster,
@@ -188,6 +258,7 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
     groupActivity,
     userText: isUserHop ? opts.userContent : "",
     isDirectMention,
+    activeTasks: activeTasksRendered,
   });
 
   const sessionKey = opts.buildSessionKey(agentId, team.id, ctx.conversationId);

@@ -7,7 +7,12 @@ import type { GatewayState } from "@/lib/store/gateway/types";
 import type { AgentState } from "@/lib/store/agent/types";
 import type { SessionState, SessionAction } from "@/lib/store/session/types";
 import type { ChatSliceState, ChatAction } from "@/lib/store/chat/types";
-import type { DispatchOpts } from "@/lib/team/types";
+import type {
+  ActiveTaskSummary,
+  DispatchOpts,
+  TeamTaskEvent,
+} from "@/lib/team/types";
+import { parseReplyDirective } from "@/lib/team/team-tasks/parser";
 import { dmSessionKey, teamSessionKey } from "@/lib/store/session-keys";
 
 type MinimalClient = Pick<RuntimeClient, "isConnected" | "sendMessage" | "abortChat">;
@@ -210,6 +215,81 @@ async function sendToTeam(
     return { fromAgentId: agentId, content: reply.content };
   };
 
+  // Pre-resolve workspace info for the task hooks. If not configured, the
+  // hooks become no-ops and the cascade still runs.
+  const workspaceRoot = team.workspaceRoot;
+  const teamId = team.id;
+  const apiBase = typeof window === "undefined"
+    ? `http://localhost:${process.env.PORT ?? "3000"}`
+    : ""; // Browser uses relative URLs.
+
+  // Best-effort: ensure team-coordination skill + gpw shim + gpw-config are
+  // up to date for this conversation. Fire-and-forget; cascade proceeds even
+  // if setup fails (agents just won't have task tooling).
+  if (workspaceRoot) {
+    const agentState = deps.getAgentState();
+    const agentNameById: Record<string, string> = {};
+    for (const a of agentState.agents) {
+      if (team.agentIds.includes(a.id)) agentNameById[a.id] = a.name;
+    }
+    void fetch(`${apiBase}/api/teams/workspace/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamId,
+        teamName: team.name,
+        workspaceRoot,
+        conversationId,
+        agentNameById,
+      }),
+    }).catch(() => {});
+  }
+
+  async function fetchActiveTasksHook() {
+    if (!workspaceRoot) return [];
+    try {
+      const params = new URLSearchParams({ workspaceRoot, conversationId });
+      const res = await fetch(`${apiBase}/api/team-tasks?${params}`);
+      if (!res.ok) return [];
+      const data = (await res.json()) as { tasks?: ActiveTaskSummary[] };
+      return (data.tasks ?? []).map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        assignee: t.assignee,
+        blockedReason: t.blockedReason,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  function handleTaskEvent(event: TeamTaskEvent) {
+    if (!workspaceRoot) return;
+    if (event.type === "reply_complete") {
+      const directive = parseReplyDirective(event.content);
+      if (directive) {
+        // Fire-and-forget — the cascade should not wait on this.
+        void fetch(`${apiBase}/api/team-tasks/${encodeURIComponent(directive.taskId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workspaceRoot,
+            conversationId: event.conversationId,
+            status: directive.kind,
+            ...(directive.kind === "blocked"
+              ? { blockedReason: directive.reason }
+              : { failedReason: directive.reason }),
+          }),
+        }).catch(() => {});
+      }
+    }
+    // Note: dispatch_start does NOT auto-flip pending → in_progress because
+    // we no longer have implicit task creation (P3 spec dropped that). The
+    // explicit `gpw task update` path is the way.
+  }
+
   try {
     await deps.dispatchTeamMessage({
       team,
@@ -236,8 +316,12 @@ async function sendToTeam(
       },
       buildSessionKey: teamSessionKey,
       maxHops: 8,
+      onTaskEvent: handleTaskEvent,
+      fetchActiveTasks: fetchActiveTasksHook,
     });
   } finally {
+    void teamId; // referenced in hooks; keep ref to avoid lint
+
     deps.dispatchChat({ type: "END_TEAM_CASCADE", conversationId });
     deps.teamAbortedRef.current.delete(conversationId);
   }

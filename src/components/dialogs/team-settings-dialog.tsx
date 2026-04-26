@@ -434,6 +434,25 @@ export function TeamSettingsDialog({
                 workspaceRoot: chosen,
               }),
             }).catch(() => {});
+            // Install/upgrade the team-coordination skill, write the gpw shim,
+            // and write the gpw-config.json. Idempotent. Non-fatal if it fails
+            // (the team can still chat — agents just won't have task tooling).
+            const agentNameById: Record<string, string> = {};
+            for (const a of agentStore.state.agents) {
+              if (team.agentIds.includes(a.id)) {
+                agentNameById[a.id] = a.name;
+              }
+            }
+            await fetch("/api/teams/workspace/setup", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                teamId: team.id,
+                teamName: team.name,
+                workspaceRoot: chosen,
+                agentNameById,
+              }),
+            }).catch(() => {});
           } catch (e) {
             setWorkspaceError(e instanceof Error ? e.message : "could not save");
           }

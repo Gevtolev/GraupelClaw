@@ -14,18 +14,21 @@ export interface AssembleOpts {
   groupActivity: string | null;
   userText: string;
   isDirectMention: boolean;
+  /** Optional rendered <active_tasks> block (from P3 task system). */
+  activeTasks?: string | null;
 }
 
 export function assembleAgentPrompt(opts: AssembleOpts): string {
   const teamContext = buildTeamContext(opts.team, opts.roster, opts.self);
   const protocols = buildGlobalProtocols();
   const activity = opts.groupActivity ?? "";
+  const tasks = opts.activeTasks ?? "";
   const trailer = opts.isDirectMention
     ? ""
     : `\n\nYou (${opts.self.name}) were mentioned in the group conversation. Please respond to the discussion.`;
   const tail = (opts.userText + trailer).trim();
 
-  return [teamContext, protocols, activity, tail].filter(Boolean).join("\n\n");
+  return [teamContext, protocols, tasks, activity, tail].filter(Boolean).join("\n\n");
 }
 
 function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): string {
