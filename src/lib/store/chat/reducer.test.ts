@@ -7,6 +7,8 @@ describe("chatReducer", () => {
       streamingStates: {},
       lastCascadeStatus: null,
       activeTeamCascades: [],
+      teamTasks: {},
+      teamTaskSummary: {},
     });
   });
 

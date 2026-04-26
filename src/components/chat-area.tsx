@@ -17,6 +17,7 @@ import {
   X,
   File as FileIcon,
   Clock,
+  ListTodo,
   Crown,
 } from "lucide-react";
 import { useGatewayStore, useAgentStore, useSessionStore, useChatStore, useActions } from "@/lib/store";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { loadUserProfile } from "@/components/dialogs/user-profile-dialog";
 import { ConversationPanel } from "@/components/conversation-panel";
+import { TaskPanel } from "@/components/team/task-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -220,13 +222,16 @@ export function ChatArea() {
   const { state: gatewayState } = useGatewayStore();
   const { state: agentState } = useAgentStore();
   const { state: sessionState } = useSessionStore();
-  const { state: chatState } = useChatStore();
+  const chatStoreFull = useChatStore();
+  const chatState = chatStoreFull.state;
+  const chatDispatch = chatStoreFull.dispatch;
   const actions = useActions();
   const [input, setInput] = useState("");
   const [composing, setComposing] = useState(false);
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showConvPanel, setShowConvPanel] = useState(false);
+  const [showTaskPanel, setShowTaskPanel] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAnchor, setMentionAnchor] = useState<DOMRect | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -283,6 +288,37 @@ export function ChatArea() {
     () => (targetTeam ? new Map(teamAgents.map((a) => [a.id, a.name] as const)) : undefined),
     [targetTeam, teamAgents],
   );
+
+  // Lightweight task summary poll (30s) so the chat-header badge dot reacts
+  // to blocked tasks even when the task panel is closed.
+  useEffect(() => {
+    if (target?.type !== "team") return;
+    const workspaceRoot = targetTeam?.workspaceRoot;
+    const convId = sessionState.activeConversationId;
+    if (!workspaceRoot || !convId) return;
+    let cancelled = false;
+    async function tick() {
+      try {
+        const params = new URLSearchParams({ workspaceRoot: workspaceRoot!, conversationId: convId! });
+        const res = await fetch(`/api/team-tasks/summary?${params}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { summary: { total: number; blocked: number; in_progress: number } };
+        if (cancelled) return;
+        chatDispatch({ type: "SET_TEAM_TASK_SUMMARY", conversationId: convId!, summary: data.summary });
+      } catch {
+        /* ignore */
+      }
+    }
+    void tick();
+    const id = setInterval(() => {
+      if (!document.hidden) void tick();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target?.type, targetTeam?.workspaceRoot, sessionState.activeConversationId]);
 
   // Streaming entries for current chat target
   const streamingEntries = Object.entries(chatState.streamingStates).filter(
@@ -650,9 +686,34 @@ export function ChatArea() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {target.type === "team" && targetTeam?.workspaceRoot && (
+          <button
+            onClick={() => {
+              setShowTaskPanel((v) => !v);
+              setShowConvPanel(false);
+            }}
+            className="ml-auto p-1.5 rounded-md hover:bg-muted text-muted-foreground relative"
+            title="Tasks"
+            aria-label="Open task board"
+          >
+            <ListTodo className="h-4 w-4" />
+            {(chatState.teamTaskSummary[sessionState.activeConversationId ?? ""]?.blocked ?? 0) > 0 && (
+              <span
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
+                aria-label="Has blocked tasks"
+              />
+            )}
+          </button>
+        )}
         <button
-          onClick={() => setShowConvPanel(!showConvPanel)}
-          className="ml-auto p-1.5 rounded-md hover:bg-muted text-muted-foreground"
+          onClick={() => {
+            setShowConvPanel(!showConvPanel);
+            setShowTaskPanel(false);
+          }}
+          className={cn(
+            "p-1.5 rounded-md hover:bg-muted text-muted-foreground",
+            target.type !== "team" && "ml-auto",
+          )}
           title="Session history"
         >
           <Clock className="h-4 w-4" />
@@ -1031,6 +1092,16 @@ export function ChatArea() {
             <ConversationPanel onClose={() => setShowConvPanel(false)} />
           </div>
         </div>
+      )}
+
+      {target.type === "team" && targetTeam && sessionState.activeConversationId && (
+        <TaskPanel
+          open={showTaskPanel}
+          onClose={() => setShowTaskPanel(false)}
+          team={targetTeam}
+          conversationId={sessionState.activeConversationId}
+          teamMembers={teamAgents}
+        />
       )}
     </div>
   );
