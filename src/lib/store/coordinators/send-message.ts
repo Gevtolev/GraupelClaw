@@ -265,6 +265,19 @@ async function sendToTeam(
     }
   }
 
+  async function fetchRecentDecisionsHook(): Promise<string | null> {
+    if (!workspaceRoot) return null;
+    try {
+      const params = new URLSearchParams({ workspaceRoot });
+      const res = await fetch(`${apiBase}/api/team-decisions?${params}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { content?: string };
+      return data.content ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   function handleTaskEvent(event: TeamTaskEvent) {
     if (!workspaceRoot) return;
     if (event.type === "reply_complete") {
@@ -318,6 +331,7 @@ async function sendToTeam(
       maxHops: 8,
       onTaskEvent: handleTaskEvent,
       fetchActiveTasks: fetchActiveTasksHook,
+      fetchRecentDecisions: fetchRecentDecisionsHook,
     });
   } finally {
     void teamId; // referenced in hooks; keep ref to avoid lint

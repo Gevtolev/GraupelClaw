@@ -16,10 +16,19 @@ export interface AssembleOpts {
   isDirectMention: boolean;
   /** Optional rendered <active_tasks> block (from P3 task system). */
   activeTasks?: string | null;
+  /** Raw decisions.md content. Truncated to ~600 chars before injection. */
+  recentDecisions?: string | null;
 }
 
+const RECENT_DECISIONS_MAX_CHARS = 600;
+
 export function assembleAgentPrompt(opts: AssembleOpts): string {
-  const teamContext = buildTeamContext(opts.team, opts.roster, opts.self);
+  const teamContext = buildTeamContext(
+    opts.team,
+    opts.roster,
+    opts.self,
+    opts.recentDecisions,
+  );
   const protocols = buildGlobalProtocols();
   const activity = opts.groupActivity ?? "";
   const tasks = opts.activeTasks ?? "";
@@ -31,7 +40,12 @@ export function assembleAgentPrompt(opts: AssembleOpts): string {
   return [teamContext, protocols, tasks, activity, tail].filter(Boolean).join("\n\n");
 }
 
-function buildTeamContext(team: AgentTeam, roster: RosterEntry[], self: Self): string {
+function buildTeamContext(
+  team: AgentTeam,
+  roster: RosterEntry[],
+  self: Self,
+  recentDecisions?: string | null,
+): string {
   const rosterLines = roster
     .map(r => {
       const tag = r.role === "TL" ? " (TL)" : "";
@@ -63,11 +77,13 @@ explicitly asks. The folder also contains a \`.graupelclaw-workspace.json\`
 marker you can inspect for team metadata.`
     : "";
 
+  const decisionsBlock = formatDecisionsBlock(recentDecisions);
+
   return `<team_context>
 ${roleHeader}
 
 ## Team roster
-${rosterLines}${workspaceBlock}
+${rosterLines}${workspaceBlock}${decisionsBlock}
 
 ## @mention protocol
 - \`@[Name](agentId)\` is a **trigger** — it activates that agent for the next hop. A bare \`@Name\` works too (the dispatcher resolves names against the roster).
@@ -113,4 +129,25 @@ function buildGlobalProtocols(): string {
 - **Anti-loop**: if a tool call fails twice consecutively with the same error, STOP and report the issue + a proposed alternative. Do not keep retrying the same approach.
 - **Anti-spam**: if you're about to @-mention the same agent more than once in this turn, consolidate into a single mention with all the context.
 </circuit_breaker>`;
+}
+
+// Truncate the raw decisions.md so it stays cheap on every dispatch. Take
+// the start of the file (newest sections sit just under the header by
+// construction in the API route) up to RECENT_DECISIONS_MAX_CHARS, breaking
+// at a section boundary when possible.
+function formatDecisionsBlock(raw?: string | null): string {
+  if (!raw || !raw.trim()) return "";
+  let body = raw;
+  if (body.length > RECENT_DECISIONS_MAX_CHARS) {
+    const slice = body.slice(0, RECENT_DECISIONS_MAX_CHARS);
+    const lastDivider = slice.lastIndexOf("\n---");
+    body = (lastDivider > 200 ? slice.slice(0, lastDivider) : slice).trimEnd() + "\n\n_(log truncated — see .team/decisions.md)_";
+  }
+  return `
+
+## Recent team decisions
+<recent_decisions>
+${body.trim()}
+</recent_decisions>
+Do not relitigate these. Build on them. If a decision is wrong, raise it explicitly with the user; don't silently revisit.`;
 }

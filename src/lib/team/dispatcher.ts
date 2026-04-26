@@ -48,6 +48,18 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     "userMentions:", userMentions.map(m => m.agentId),
     "initialTargets:", currentTargets,
   );
+
+  // Decisions log is fetched once per cascade. Same value injected into every
+  // agent's prompt regardless of hop — safe to fix at cascade start.
+  let recentDecisions: string | null = null;
+  if (opts.fetchRecentDecisions) {
+    try {
+      recentDecisions = await opts.fetchRecentDecisions();
+    } catch (e) {
+      console.debug("[team-dispatcher] fetchRecentDecisions failed", e);
+    }
+  }
+
   while (currentTargets.length > 0 && ctx.hop < ctx.maxHops) {
     if (opts.isAborted(ctx.conversationId)) {
       opts.onCascadeStopped?.({ reason: "abort", hop: ctx.hop });
@@ -78,7 +90,7 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
 
     const replies = await Promise.all(
       currentTargets.map(agentId =>
-        dispatchOne({ agentId, ctx, opts, isUserHop, activeTasks }),
+        dispatchOne({ agentId, ctx, opts, isUserHop, activeTasks, recentDecisions }),
       ),
     );
 
@@ -175,10 +187,11 @@ interface DispatchOneArgs {
   opts: DispatchOpts;
   isUserHop: boolean;
   activeTasks?: ActiveTaskSummary[];
+  recentDecisions?: string | null;
 }
 
 async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null> {
-  const { agentId, ctx, opts, isUserHop, activeTasks } = args;
+  const { agentId, ctx, opts, isUserHop, activeTasks, recentDecisions } = args;
   const state = opts.getState();
   const team = state.teams.find(t => t.id === opts.team.id) ?? opts.team;
 
@@ -259,6 +272,7 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
     userText: isUserHop ? opts.userContent : "",
     isDirectMention,
     activeTasks: activeTasksRendered,
+    recentDecisions,
   });
 
   const sessionKey = opts.buildSessionKey(agentId, team.id, ctx.conversationId);

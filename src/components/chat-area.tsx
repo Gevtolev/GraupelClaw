@@ -19,6 +19,8 @@ import {
   Clock,
   ListTodo,
   Crown,
+  Scale,
+  Bookmark,
 } from "lucide-react";
 import { useGatewayStore, useAgentStore, useSessionStore, useChatStore, useActions } from "@/lib/store";
 import { resolveTlAgentId } from "@/lib/team";
@@ -29,6 +31,8 @@ import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { loadUserProfile } from "@/components/dialogs/user-profile-dialog";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { TaskPanel } from "@/components/team/task-panel";
+import { DecisionsPopover } from "@/components/team/decisions-popover";
+import { MarkDecisionDialog, type MarkDecisionInput } from "@/components/team/mark-decision-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -232,6 +236,11 @@ export function ChatArea() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showConvPanel, setShowConvPanel] = useState(false);
   const [showTaskPanel, setShowTaskPanel] = useState(false);
+  const [showDecisions, setShowDecisions] = useState(false);
+  const [markDecisionFor, setMarkDecisionFor] = useState<{
+    decidedBy: string;
+    rationale: string;
+  } | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAnchor, setMentionAnchor] = useState<DOMRect | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -687,23 +696,33 @@ export function ChatArea() {
           </DropdownMenu>
         )}
         {target.type === "team" && targetTeam?.workspaceRoot && (
-          <button
-            onClick={() => {
-              setShowTaskPanel((v) => !v);
-              setShowConvPanel(false);
-            }}
-            className="ml-auto p-1.5 rounded-md hover:bg-muted text-muted-foreground relative"
-            title="Tasks"
-            aria-label="Open task board"
-          >
-            <ListTodo className="h-4 w-4" />
-            {(chatState.teamTaskSummary[sessionState.activeConversationId ?? ""]?.blocked ?? 0) > 0 && (
-              <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
-                aria-label="Has blocked tasks"
-              />
-            )}
-          </button>
+          <>
+            <button
+              onClick={() => setShowDecisions(true)}
+              className="ml-auto p-1.5 rounded-md hover:bg-muted text-muted-foreground"
+              title="Team decisions"
+              aria-label="Open team decisions"
+            >
+              <Scale className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setShowTaskPanel((v) => !v);
+                setShowConvPanel(false);
+              }}
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground relative"
+              title="Tasks"
+              aria-label="Open task board"
+            >
+              <ListTodo className="h-4 w-4" />
+              {(chatState.teamTaskSummary[sessionState.activeConversationId ?? ""]?.blocked ?? 0) > 0 && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
+                  aria-label="Has blocked tasks"
+                />
+              )}
+            </button>
+          </>
         )}
         <button
           onClick={() => {
@@ -870,6 +889,24 @@ export function ChatArea() {
                     title="Retry"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {msg.role === "assistant" && target.type === "team" && targetTeam?.workspaceRoot && (
+                  <button
+                    onClick={() => {
+                      const author =
+                        agentState.agents.find((a) => a.id === msg.agentId)?.name ??
+                        msg.agentId ??
+                        "Agent";
+                      setMarkDecisionFor({
+                        decidedBy: author,
+                        rationale: msg.content.slice(0, 300),
+                      });
+                    }}
+                    className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                    title="Mark as decision"
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
@@ -1101,6 +1138,39 @@ export function ChatArea() {
           team={targetTeam}
           conversationId={sessionState.activeConversationId}
           teamMembers={teamAgents}
+        />
+      )}
+
+      {target.type === "team" && targetTeam?.workspaceRoot && (
+        <DecisionsPopover
+          open={showDecisions}
+          onOpenChange={setShowDecisions}
+          workspaceRoot={targetTeam.workspaceRoot}
+        />
+      )}
+
+      {target.type === "team" && targetTeam?.workspaceRoot && markDecisionFor && (
+        <MarkDecisionDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setMarkDecisionFor(null);
+          }}
+          defaultDecidedBy={markDecisionFor.decidedBy}
+          defaultRationale={markDecisionFor.rationale}
+          onSubmit={async (input: MarkDecisionInput) => {
+            const res = await fetch("/api/team-decisions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                workspaceRoot: targetTeam.workspaceRoot,
+                ...input,
+              }),
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error ?? "save failed");
+            }
+          }}
         />
       )}
     </div>

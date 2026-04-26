@@ -77,6 +77,13 @@ export interface DispatchOpts {
    * an `<active_tasks>` block. P3.
    */
   fetchActiveTasks?: () => Promise<ActiveTaskSummary[]>;
+  /**
+   * Optional decisions fetcher invoked ONCE at cascade start (not per hop).
+   * Decisions change rarely; fetching once amortizes the read across all
+   * dispatches in a single user turn. The result is injected verbatim
+   * (truncated to ~600 chars) into every agent's `<team_context>`. P5.
+   */
+  fetchRecentDecisions?: () => Promise<string | null>;
 }
 
 export interface ActiveTaskSummary {
