@@ -278,9 +278,7 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
   const sessionKey = opts.buildSessionKey(agentId, team.id, ctx.conversationId);
   const attachments = isUserHop ? opts.attachments : undefined;
 
-  // TODO(task-2): pass systemPrompt and userPrompt as separate channels.
-  const prompt = [systemPrompt, userPrompt].filter(Boolean).join("\n\n");
-  return opts.sendToAgent(agentId, sessionKey, prompt, attachments);
+  return opts.sendToAgent(agentId, sessionKey, userPrompt, attachments, systemPrompt);
 }
 
 function lastSpeakTs(messages: Message[], agentId: string): number | null {

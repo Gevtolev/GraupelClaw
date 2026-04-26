@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Agent, AgentTeam, Message } from "@/types";
-import type { TeamDispatchState } from "./types";
+import type { TeamDispatchState, DispatchOpts } from "./types";
 import { dispatchTeamMessage } from "./dispatcher";
 
 function team(agentIds: string[], tlAgentId?: string): AgentTeam {
@@ -260,5 +260,37 @@ describe("dispatchTeamMessage", () => {
 
     const a4Calls = sendToAgent.mock.calls.filter(c => c[0] === "a4");
     expect(a4Calls.length).toBe(1);
+  });
+});
+
+describe("dispatchTeamMessage — system/user prompt split", () => {
+  it("passes systemPrompt as the 5th arg with stable team context, userPrompt without it", async () => {
+    const t = team(["a1", "a2"], "a2");
+    const agents = [agent("a1", "A"), agent("a2", "B")];
+    const s = state(agents, [t]);
+    const sendToAgent = vi.fn<DispatchOpts["sendToAgent"]>(async (id) => ({
+      fromAgentId: id, content: "ok",
+    }));
+
+    await dispatchTeamMessage({
+      team: t, conversationId: "c1", rootUserMessageId: "m1",
+      userContent: "ping", getState: () => s, sendToAgent,
+      isAborted: () => false, buildSessionKey, maxHops: 8,
+    });
+
+    expect(sendToAgent).toHaveBeenCalledTimes(1);
+    const call = sendToAgent.mock.calls[0];
+    // signature: (agentId, sessionKey, userPrompt, attachments, systemPrompt)
+    const userPrompt = call[2] as string;
+    const systemPrompt = call[4] as string | undefined;
+
+    expect(systemPrompt).toBeTypeOf("string");
+    expect(systemPrompt).toContain(`You are the TL (Team Leader) of "dev"`);
+    expect(systemPrompt).toContain("`@[A](a1)`");
+    expect(systemPrompt).toContain("<task_management>");
+
+    expect(userPrompt).not.toContain(`You are the TL`);
+    expect(userPrompt).not.toContain("<task_management>");
+    expect(userPrompt).toContain("ping");
   });
 });

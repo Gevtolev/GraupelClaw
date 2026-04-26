@@ -61,6 +61,7 @@ export interface DispatchOpts {
     sessionKey: string,
     text: string,
     attachments?: MessageAttachment[],
+    systemPrompt?: string,
   ) => Promise<DispatchReply | null>;
   isAborted: (conversationId: string) => boolean;
   onCascadeStopped?: (info: { reason: OnCascadeStoppedReason; hop: number }) => void;
