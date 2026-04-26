@@ -1,41 +1,39 @@
-# P3 — Task System (gpw CLI + skill + tasks API + dispatcher state machine)
+# P3 — 任务系统（gpw CLI + skill + tasks API + dispatcher 状态机）
 
-> Spec synthesized from a 2-agent brainstorm (proposer + critic) on 2026-04-26.
-> Builds on **P2** (`AgentTeam.workspaceRoot`).
+> 由 2026-04-26 的双 agent brainstorm（提案者 + 评审者）综合而成。
+> 在 **P2** （`AgentTeam.workspaceRoot`）的基础上构建。
 
-## Goal
+## 目标
 
-Give every team a structured task store the agents can manipulate via a CLI
-(over OpenClaw's existing `exec` tool), with prompt-injected pending tasks
-(accio's Zeigarnik mechanism) so agents stay on-task.
+给每个 team 一个结构化的任务存储，agent 可通过 CLI（走 OpenClaw 既有的
+`exec` 工具）操作；同时把待办任务通过 prompt 注入给 agent（accio 的
+Zeigarnik 机制），让 agent 持续聚焦在任务上。
 
-## Scope cuts (after critic round)
+## 范围裁剪（评审轮过后）
 
-- **❌ DROP implicit task creation** (auto-create task per @-mention parsed from
-  reply). Critic argued: title extraction is fragile across languages, dedup
-  collapses legitimate re-tasks, and explicit creation is debuggable. Phase
-  back in later if the explicit-only experience feels too high-friction.
-- **❌ DROP `_index.json`** for `getById`. Single-file read is O(1); unneeded
-  complexity until measured.
-- All other proposer ideas survive with the critic's hardenings below.
+- **❌ 砍掉隐式任务创建**（按回复中解析出的 @-mention 自动创建任务）。评审者指出：
+  跨语言抽取标题脆弱、去重会折叠掉合法的重复指派、显式创建可调试性更高。
+  如果显式创建体感太重，再考虑回滚此决策。
+- **❌ 砍掉 `_index.json`**（用于 `getById`）。单文件读已是 O(1)；在没测到瓶颈
+  之前不必要复杂化。
+- 其它提案者的设计点全部保留，并按评审者的加固意见修正（见下）。
 
-## Key design decisions
+## 关键设计决策
 
-### D1. Human-readable task IDs: `TASK-001`, `TASK-002`, ...
-Critic was right: UUIDs are unusable for agent-to-agent task references. We
-keep a per-team counter `{workspaceRoot}/.team/tasks/_counter.json`:
+### D1. 任务 ID 采用人类可读形式：`TASK-001`、`TASK-002` ……
+评审者说得对：UUID 在 agent 互相引用任务时几乎无法用。改为按 team 维护一个
+计数器 `{workspaceRoot}/.team/tasks/_counter.json`：
 ```json
 { "next": 7 }
 ```
-Incremented atomically (read-modify-write under file lock) on each create.
-Format: `TASK-` + zero-padded-3-digit number. Resets only if user manually
-deletes the counter.
+每次创建时在文件锁下做原子的 read-modify-write。格式：`TASK-` + 三位零填充
+数字。仅当用户手动删除计数器文件时才会重置。
 
-### D2. Schema versioned task JSON
-Every task includes `schemaVersion: 1`. Read path: if missing or different,
-run a migration table. Cheap insurance.
+### D2. 任务 JSON 带 schema 版本号
+每条任务都包含 `schemaVersion: 1`。读取路径：缺失或与当前版本不一致时，走
+迁移表处理。一份廉价保险。
 
-### D3. Task data model
+### D3. 任务数据模型
 ```ts
 export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked" | "failed";
 export type TaskPriority = "P0" | "P1" | "P2";
@@ -60,15 +58,15 @@ export interface TeamTask {
   failedReason?: string;
 }
 ```
-Storage: `{workspaceRoot}/.team/tasks/{conversationId}/{taskId}.json`.
-One file per task; atomic write via tmp-file + `fs.rename`.
+存储：`{workspaceRoot}/.team/tasks/{conversationId}/{taskId}.json`。
+一任务一文件；通过 tmp 文件 + `fs.rename` 原子写入。
 
-### D4. CLI install — config-driven, no hardcoded paths
-Critic was right: the shim's hardcoded `<graupelclaw-install-path>` breaks if
-user moves GraupelClaw or has multiple checkouts. **Fix**:
+### D4. CLI 安装：以配置驱动，不硬编码路径
+评审者说得对：shim 中硬编码 `<graupelclaw-install-path>` 在用户挪 GraupelClaw
+或维护多个 checkout 时会失效。**修复**：
 
-- GraupelClaw on team activation writes:
-  - `{workspaceRoot}/.team/gpw-config.json`:
+- GraupelClaw 在 team 激活时写入：
+  - `{workspaceRoot}/.team/gpw-config.json`：
     ```json
     {
       "schemaVersion": 1,
@@ -79,7 +77,7 @@ user moves GraupelClaw or has multiple checkouts. **Fix**:
       "agentNameById": { "main": "Slico", "...": "Eva" }
     }
     ```
-  - `{workspaceRoot}/.team/bin/gpw` shim (executable bash):
+  - `{workspaceRoot}/.team/bin/gpw` shim（可执行 bash 脚本）：
     ```bash
     #!/usr/bin/env bash
     set -euo pipefail
@@ -88,28 +86,28 @@ user moves GraupelClaw or has multiple checkouts. **Fix**:
     ROOT="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CONFIG','utf8')).graupelclawRoot)")"
     exec node "$ROOT/tools/gpw/dist/index.js" "$@"
     ```
-  - Read `apiBase` and `teamId` from same config inside CLI; never assume port.
+  - CLI 内部从同一份配置读 `apiBase` 和 `teamId`；绝不假设端口。
 
-- Idempotent: rewrite shim+config only when content differs (compare hash) to
-  avoid race when two team activations land in the same second.
+- 幂等：仅当内容（hash）有差异时才重写 shim 与 config，避免两次 team 激活
+  落在同一秒时的竞态。
 
-- Same shim is used across team activations; only config content changes.
+- shim 在多次 team 激活之间复用；只有 config 内容会变。
 
-### D5. Skill installation — versioned, never overwrites user-edited
-Critic correctly flagged that blanket-overwriting `team-coordination/SKILL.md`
-violates the spirit of "don't modify user files."
+### D5. Skill 安装：带版本号、不覆盖用户已编辑的文件
+评审者准确地指出，无脑覆盖 `team-coordination/SKILL.md` 违背 "不修改用户文件"
+的原则。
 
-**Fix**: Frontmatter includes `x-graupelclaw-version: <n>`. On startup:
-1. If skill file doesn't exist → install (write our version).
-2. If exists and version is missing → log warning, do NOT overwrite (user-edited).
-3. If exists and version < current → write new version.
-4. If exists and version >= current → no-op.
+**修复**：frontmatter 中加入 `x-graupelclaw-version: <n>`。启动时：
+1. skill 文件不存在 → 安装我们的版本。
+2. 文件存在但缺版本号 → 记 warning，**不**覆盖（视为用户已编辑）。
+3. 文件存在但版本 < 当前 → 升级写入新版本。
+4. 文件存在且版本 >= 当前 → 不动。
 
-This installs once, upgrades cleanly, and respects user customization.
+如此一来：首次安装、平滑升级、尊重用户定制三件事都满足。
 
-### D6. Skill content (what agents see)
+### D6. Skill 内容（agent 看到的版本）
 
-`~/.openclaw/workspace/skills/team-coordination/SKILL.md`:
+`~/.openclaw/workspace/skills/team-coordination/SKILL.md`：
 ```markdown
 ---
 name: team-coordination
@@ -154,46 +152,43 @@ $WS/.team/bin/gpw task get TASK-007
 - `in_progress` → `failed` (always include `--reason`)
 ```
 
-### D7. CLI ↔ API auth: localhost-only + port pinned in config
-- No auth tokens. Only reachable from same machine.
-- Port comes from `apiBase` in config (D4) — Next.js startup writes the actual
-  bound port, never assumes 3000.
-- Multiple browser tabs: last team activation wins on writing config (this is
-  fine — config is per-team-workspace, not global).
+### D7. CLI ↔ API 鉴权：仅 localhost + 端口由配置注入
+- 不引入鉴权 token，仅本机可达即可。
+- 端口来自 D4 中的 `apiBase` —— Next.js 启动时写入实际绑定的端口，不假设 3000。
+- 多个浏览器标签页：最后一次 team 激活会覆盖配置（这是可接受的 —— 配置是
+  per-team-workspace 的，不是全局的）。
 
-### D8. Concurrent write safety
-- Per-task file isolation removes most contention.
-- Same-task PATCH serialized via in-memory `Map<taskId, Promise>` mutex (single
-  Next.js process, OK for our deployment).
-- Atomic write: `writeFile(tmp)` + `fs.rename(tmp, target)`. Same FS, atomic
-  on POSIX.
-- LIST endpoint: `try { JSON.parse(readFile(file)) } catch (ENOENT|SyntaxError)
-  { skip with debug log }` — handles "read during atomic rename" race.
-- Counter file (`_counter.json`) increments under the same mutex pattern.
+### D8. 并发写安全
+- 一任务一文件本身已经把大部分竞争消除。
+- 同一任务的 PATCH 通过内存中的 `Map<taskId, Promise>` 锁串行（单 Next.js 进程，
+  对当前部署形态足够）。
+- 原子写：`writeFile(tmp)` + `fs.rename(tmp, target)`。同一文件系统、POSIX 下原子。
+- LIST 端点：`try { JSON.parse(readFile(file)) } catch (ENOENT|SyntaxError)
+  { skip with debug log }` —— 处理 "原子 rename 中途读取" 的竞态。
+- 计数器文件（`_counter.json`）走同样的 mutex 模式。
 
-### D9. Task-to-reply attribution (status flips)
-**The proposer's design lacked this**: an agent can have multiple `in_progress`
-tasks; reply prefix `[BLOCKED:]` doesn't say which task.
+### D9. 任务 ↔ 回复关联（状态翻转）
+**提案者的设计缺这一点**：一个 agent 可能同时有多条 `in_progress` 任务，
+回复前缀 `[BLOCKED:]` 没说是哪一条。
 
-**Fix**:
-- When dispatcher dispatches an agent who has tasks `in_progress` for that
-  conversation, the prompt's `<active_tasks>` block includes a marker:
+**修复**：
+- 当 dispatcher 派发某个 agent，且其在该会话下有 `in_progress` 任务时，
+  prompt 里的 `<active_tasks>` 区块加入标记：
   `### Your current task → TASK-007 (use this id when you update status)`
-- Reply prefix protocol is more strict:
-  - `[BLOCKED: TASK-007 reason here]` (id required) → flip TASK-007 to blocked
-  - `[FAILED: TASK-007 reason here]` (id required) → flip TASK-007 to failed
-  - No prefix or no id → no implicit flip; agent must call `gpw task update`
-- Empty reply → flip the agent's most-recently-dispatched in_progress task to
-  `failed` with reason "empty reply".
+- 回复前缀协议更严格：
+  - `[BLOCKED: TASK-007 reason here]`（必须带 id）→ 翻 TASK-007 为 blocked
+  - `[FAILED: TASK-007 reason here]`（必须带 id）→ 翻 TASK-007 为 failed
+  - 没前缀 / 没 id → 不做隐式翻转；agent 必须自己调 `gpw task update`
+- 空回复 → 把该 agent 最近一次被派发的 in_progress 任务翻为 `failed`，原因
+  填 "empty reply"。
 
-This avoids phantom completions while keeping the status machine driven by
-explicit signals.
+如此既避免了幻象的 completion，又保持状态机由显式信号驱动。
 
-### D10. Pending-task injection in prompt (per-agent)
-Critic was right — injecting all 20 tasks to every agent wastes tokens.
+### D10. Pending 任务在 prompt 中的注入（按 agent）
+评审者说得对：把 20 条任务全注给每个 agent 太浪费 token。
 
-**Fix**: agent-specific. In `prompt-assembler.ts`, after roster (and after the
-workspace block from P2):
+**修复**：按 agent 定制。在 `prompt-assembler.ts` 中，roster 之后（且在 P2 的
+workspace 区块之后）：
 
 ```
 ## Active tasks
@@ -205,32 +200,31 @@ workspace block from P2):
 3 other tasks in progress across the team.
 ```
 
-Cap "Your tasks" at 10. Other-team count is a one-liner. Worst case ~600
-chars per agent.
+"Your tasks" 上限 10 条；其余团队任务以一行计数概括。最坏情况每 agent ~600 字符。
 
-If agent has 0 tasks of any status, omit `### Your tasks` entirely and just
-show the team count.
+如果该 agent 任何状态的任务都为 0 条，整个 `### Your tasks` 子块省略，仅保留
+团队计数行。
 
-If team has 0 tasks: omit the whole `## Active tasks` section.
+如果整个 team 没有任务：整段 `## Active tasks` 都省略。
 
-### D11. Dispatcher integration
-- New optional `onTaskEvent?: (e: TaskEvent) => void` callback on `DispatchOpts`.
-- Wired in `send-message.ts sendToTeam`.
-- Events emitted:
-  - `dispatch_start { agentId, conversationId }` → flip the agent's most-recent
-    `pending` task assigned to them to `in_progress` (if any).
-  - `reply_complete { agentId, conversationId, content }` → if reply matches
-    `^\s*\[BLOCKED: (TASK-\d+) (.+)\]$` or `^\s*\[FAILED: ...$`, flip that
-    task. Otherwise no implicit flip (D9 — no auto-completed).
-  - `reply_empty { agentId, conversationId }` → flip most recent in_progress
-    of this agent to failed with reason "empty reply".
+### D11. Dispatcher 集成
+- 在 `DispatchOpts` 上新增可选 `onTaskEvent?: (e: TaskEvent) => void` 回调。
+- 在 `send-message.ts sendToTeam` 中接入。
+- 触发的事件：
+  - `dispatch_start { agentId, conversationId }` → 把该 agent 名下最近一条
+    `pending` 任务（如有）翻为 `in_progress`。
+  - `reply_complete { agentId, conversationId, content }` → 若回复匹配
+    `^\s*\[BLOCKED: (TASK-\d+) (.+)\]$` 或 `^\s*\[FAILED: ...$`，翻该任务；
+    否则不做隐式翻转（D9 —— 不自动 completed）。
+  - `reply_empty { agentId, conversationId }` → 该 agent 最近一条 in_progress
+    任务翻 failed，原因 "empty reply"。
 
-The handler implementation lives in `src/lib/store/coordinators/team-tasks.ts`
-(new file), invoked from `send-message.ts`.
+handler 实现位于 `src/lib/store/coordinators/team-tasks.ts`（新文件），由
+`send-message.ts` 调用。
 
-### D12. API routes
+### D12. API 路由
 
-All under `src/app/api/teams/[teamId]/tasks/`:
+全部位于 `src/app/api/teams/[teamId]/tasks/`：
 
 ```
 POST    /api/teams/{teamId}/tasks
@@ -248,15 +242,14 @@ PATCH   /api/teams/{teamId}/tasks/{taskId}
    returns: { task: TeamTask } | 404
 ```
 
-`workspaceRoot` resolved server-side via shared `resolveTeamWorkspace(teamId)`
-(reads from app store / DB).
+`workspaceRoot` 由共享的 `resolveTeamWorkspace(teamId)` 在服务端解析（从 app
+store / DB 读）。
 
-### D13. Default fallback if reply has no in_progress task
-If `dispatch_start` fires for an agent with no pending tasks, no task is
-auto-created (we dropped implicit creation). The TL or agent must call
-`gpw task create` to track this work.
+### D13. 没有 in_progress 任务时的兜底
+若 `dispatch_start` 时该 agent 没有 pending 任务，不自动建任务（隐式创建已被砍）。
+TL 或 agent 必须手动 `gpw task create` 来追踪此次工作。
 
-## File inventory
+## 文件清单
 
 ```
 tools/gpw/index.ts                        // CLI source
@@ -287,45 +280,45 @@ src/lib/openclaw-skill-installer.ts        // new — handles versioned install
                                            // of team-coordination/SKILL.md
 ```
 
-## Test scenarios (must cover)
+## 测试场景（必须覆盖）
 
-1. **Counter atomicity**: 5 concurrent task creates → ids `TASK-001..005`, no skips/dups.
-2. **Atomic write**: simulate kill mid-write → next read sees old or new, not corrupt.
-3. **Mutex on PATCH**: 5 concurrent PATCHes on same task → all serialized, last wins.
-4. **LIST race**: file mid-rename → LIST skips it gracefully.
-5. **Skill install**:
-   - file missing → installs ours
-   - file present without version → skip + warn
-   - file present older version → upgrade
-   - file present newer version → skip
-6. **Reply prefix parsing**:
-   - `[BLOCKED: TASK-007 reason]` → flip TASK-007 only
-   - `[BLOCKED:` mid-paragraph → ignored (only first non-whitespace line)
-   - empty reply → most recent in_progress → failed
-7. **Per-agent prompt injection**:
-   - agent with 2 tasks → "Your tasks" lists 2
-   - agent with 0 tasks but team has 3 → only "3 other tasks" line
-   - team with 0 tasks → section omitted entirely
-8. **Port portability**: GraupelClaw on 3001 → CLI uses 3001 from config.
-9. **Schema migration**: task with `schemaVersion: 0` → migrated on read to v1.
+1. **计数器原子性**：5 个并发 create → 得到 `TASK-001..005`，无跳号、无重复。
+2. **原子写**：写到一半被 kill → 下次读到的是旧值或新值，不会损坏。
+3. **PATCH mutex**：同一任务 5 个并发 PATCH → 全部串行，最后写入胜出。
+4. **LIST 竞态**：rename 中途的文件 → LIST 优雅跳过。
+5. **Skill 安装**：
+   - 文件不存在 → 安装我们的版本
+   - 文件存在但无版本号 → 跳过 + warn
+   - 文件存在但版本较旧 → 升级
+   - 文件存在且版本更新或相同 → 跳过
+6. **回复前缀解析**：
+   - `[BLOCKED: TASK-007 reason]` → 仅翻 TASK-007
+   - `[BLOCKED:` 出现在段落中部 → 忽略（仅识别首个非空白行）
+   - 空回复 → 该 agent 最近一条 in_progress → failed
+7. **per-agent prompt 注入**：
+   - agent 有 2 条任务 → "Your tasks" 列出 2 条
+   - agent 任务数 0、team 总数 3 → 仅保留 "3 other tasks" 行
+   - team 任务数 0 → 整段省略
+8. **端口可移植性**：GraupelClaw 跑在 3001 → CLI 从配置取到 3001。
+9. **schema 迁移**：`schemaVersion: 0` 的任务 → 读取时迁移到 v1。
 
-## Implementation order
+## 实施顺序
 
-1. [ ] Task data model + parser + store (no deps on UI)
-2. [ ] API routes + tests
-3. [ ] CLI + esbuild + tests
-4. [ ] Skill installer + tests
-5. [ ] On team activation: write gpw-config + shim + ensure skill installed
-6. [ ] Dispatcher onTaskEvent hook + send-message wiring
-7. [ ] prompt-assembler `<active_tasks>` injection
-8. [ ] Manual end-to-end smoke: send a team message → agent uses CLI →
-   subsequent agents see the task in their prompt → status flips work.
+1. [ ] 任务数据模型 + parser + store（无 UI 依赖）
+2. [ ] API 路由 + 测试
+3. [ ] CLI + esbuild + 测试
+4. [ ] Skill 安装器 + 测试
+5. [ ] team 激活时：写 gpw-config + shim + 确保 skill 已安装
+6. [ ] dispatcher 的 onTaskEvent hook + send-message 接线
+7. [ ] prompt-assembler `<active_tasks>` 注入
+8. [ ] 手工端到端冒烟：发一条 team 消息 → agent 调 CLI → 后续 agent 在 prompt
+   里看到该任务 → 状态翻转生效。
 
-## Out of scope (explicitly)
+## 不在范围内（明确）
 
-- Implicit task creation from @-mentions (deferred to a later PR)
-- `_index.json` global lookup (deferred until measured slow)
-- Cross-conversation tasks
-- Task templates
-- Time tracking / due dates
-- Task subtasks (`parentTaskId`)
+- 由 @-mention 隐式创建任务（推迟到后续 PR）
+- `_index.json` 全局索引（在测出慢之前不做）
+- 跨会话任务
+- 任务模板
+- 工时记录 / 截止日期
+- 任务子任务（`parentTaskId`）
