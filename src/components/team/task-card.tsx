@@ -61,7 +61,7 @@ export function TaskCard({ task, agent, onOpen }: TaskCardProps) {
             </span>
           ) : (
             <img
-              src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+              src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id, agent.specialty)}
               alt={agent.name}
               className="h-6 w-6 rounded-full bg-muted object-cover"
             />

@@ -220,7 +220,7 @@ export function AgentSettingsDialog({
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{avatar}</span>
                 ) : (
                   <img
-                    src={isImageAvatar(avatar) ? avatar : getAgentAvatarUrl(agent.id)}
+                    src={isImageAvatar(avatar) ? avatar : getAgentAvatarUrl(agent.id, agent.specialty)}
                     alt={agent.name}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />
@@ -298,9 +298,10 @@ export function AgentSettingsDialog({
                     onChange={handleAvatarChange}
                     shape="circle"
                     seed={agent.id}
+                    specialty={agent.specialty}
                     fallback={
                       <img
-                        src={getAgentAvatarUrl(agent.id)}
+                        src={getAgentAvatarUrl(agent.id, agent.specialty)}
                         alt={name}
                         className="h-full w-full object-cover"
                       />

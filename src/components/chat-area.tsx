@@ -592,7 +592,7 @@ export function ChatArea() {
             <span className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-base shrink-0">{targetAgent?.avatar}</span>
           ) : (
             <img
-              src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id)}
+              src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id, targetAgent?.specialty)}
               alt={chatTitle}
               className="h-7 w-7 rounded-full bg-muted object-cover shrink-0"
             />
@@ -629,7 +629,7 @@ export function ChatArea() {
                         </span>
                       ) : (
                         <img
-                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id, agent.specialty)}
                           alt={agent.name}
                           className="h-6 w-6 rounded-full border-2 border-background bg-muted object-cover"
                         />
@@ -664,7 +664,7 @@ export function ChatArea() {
                         </span>
                       ) : (
                         <img
-                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id)}
+                          src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id, agent.specialty)}
                           alt={displayName}
                           className="h-9 w-9 rounded-full bg-muted object-cover"
                         />
@@ -755,7 +755,7 @@ export function ChatArea() {
                 <span className="h-16 w-16 rounded-full bg-muted flex items-center justify-center text-3xl mb-4">{targetAgent?.avatar}</span>
               ) : (
                 <img
-                  src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id)}
+                  src={isImageAvatar(targetAgent?.avatar) ? targetAgent!.avatar! : getAgentAvatarUrl(target.id, targetAgent?.specialty)}
                   alt={chatTitle}
                   className="h-16 w-16 rounded-full bg-muted object-cover mb-4"
                 />
@@ -813,7 +813,7 @@ export function ChatArea() {
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{agent?.avatar}</span>
                 ) : (
                   <img
-                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(msg.agentId || "unknown")}
+                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(msg.agentId || "unknown", agent?.specialty)}
                     alt={agent?.name || "Agent"}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />
@@ -926,7 +926,7 @@ export function ChatArea() {
                   <span className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-lg">{agent?.avatar}</span>
                 ) : (
                   <img
-                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(agentId)}
+                    src={isImageAvatar(agent?.avatar) ? agent!.avatar! : getAgentAvatarUrl(agentId, agent?.specialty)}
                     alt={agent?.name || "Agent"}
                     className="h-8 w-8 rounded-full bg-muted object-cover"
                   />

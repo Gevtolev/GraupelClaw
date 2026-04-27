@@ -127,7 +127,7 @@ export const MentionAutocomplete = forwardRef<MentionAutocompleteHandle, Props>(
                   <span className="h-5 w-5 flex items-center justify-center text-sm">{a.avatar}</span>
                 ) : (
                   <img
-                    src={isImageAvatar(a.avatar) ? a.avatar : getAgentAvatarUrl(a.id)}
+                    src={isImageAvatar(a.avatar) ? a.avatar : getAgentAvatarUrl(a.id, a.specialty)}
                     alt={a.name}
                     className="h-5 w-5 rounded-full bg-muted object-cover"
                   />

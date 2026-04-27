@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useGatewayStore, useAgentStore } from "@/lib/store";
-import { getAgentAvatarUrl } from "@/lib/avatar";
+import { getAgentAvatarUrl, isEmojiAvatar, isImageAvatar } from "@/lib/avatar";
 import { Check, FolderOpen } from "lucide-react";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 
@@ -170,7 +170,15 @@ export function CreateTeamDialog({
                             : "hover:bg-accent/50 text-muted-foreground"
                         }`}
                       >
-                        <img src={getAgentAvatarUrl(agent.id)} alt={agent.name} className="h-6 w-6 rounded-full bg-muted" />
+                        {isEmojiAvatar(agent.avatar) ? (
+                          <span className="h-6 w-6 flex items-center justify-center text-sm">{agent.avatar}</span>
+                        ) : (
+                          <img
+                            src={isImageAvatar(agent.avatar) ? agent.avatar : getAgentAvatarUrl(agent.id, agent.specialty)}
+                            alt={agent.name}
+                            className="h-6 w-6 rounded-full bg-muted object-cover"
+                          />
+                        )}
                         <span className="text-sm flex-1 text-left">{agent.name}</span>
                         <span className="text-[11px] text-muted-foreground">{agent.specialty}</span>
                         {selected && <Check className="h-4 w-4 text-green-600" />}

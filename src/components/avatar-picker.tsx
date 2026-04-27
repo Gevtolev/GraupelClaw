@@ -3,15 +3,12 @@
 import React, { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { AGENT_AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/avatar";
 import { cn } from "@/lib/utils";
 import { Dices, Smile, Upload, X } from "lucide-react";
+import type { AgentSpecialty } from "@/types";
 
 const MAX_AVATAR_SIZE = 128 * 1024; // 128KB
-
-const DICEBEAR_STYLES = [
-  "bottts", "bottts-neutral", "avataaars", "fun-emoji",
-  "lorelei", "notionists", "pixel-art", "thumbs",
-];
 
 const EMOJI_GROUPS = [
   ["\u{1F600}", "\u{1F602}", "\u{1F923}", "\u{1F60A}", "\u{1F60E}", "\u{1F929}", "\u{1F607}", "\u{1F973}"],
@@ -64,8 +61,10 @@ interface AvatarPickerProps {
   shape?: "circle" | "rounded";
   /** Fallback content when no avatar is set */
   fallback?: React.ReactNode;
-  /** Seed for generating random DiceBear avatars */
+  /** Seed for showing the built-in avatar picker */
   seed?: string;
+  /** Specialty used by the built-in agent avatar packs */
+  specialty?: AgentSpecialty;
 }
 
 export function AvatarPicker({
@@ -75,9 +74,9 @@ export function AvatarPicker({
   shape = "circle",
   fallback,
   seed,
+  specialty = "general",
 }: AvatarPickerProps) {
   const [activePicker, setActivePicker] = useState<"emoji" | "random" | null>(null);
-  const [randomSuffix, setRandomSuffix] = useState(0);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,9 +85,6 @@ export function AvatarPicker({
       setActivePicker(null);
     } else {
       setActivePicker(picker);
-      if (picker === "random") {
-        setRandomSuffix((s) => s + 1);
-      }
     }
   }
 
@@ -134,7 +130,7 @@ export function AvatarPicker({
                 onClick={() => togglePicker("random")}
               >
                 <Dices className="h-4 w-4 mr-1.5" />
-                Random
+                Built-in
               </Button>
             )}
             <Button
@@ -175,20 +171,20 @@ export function AvatarPicker({
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <p className="text-xs text-muted-foreground">
-            Pick an emoji or upload an image (max 128KB)
+            Pick a built-in avatar, emoji, or upload an image (max 128KB)
           </p>
         </div>
       </div>
 
-      {/* Random avatar grid */}
+      {/* Built-in avatar grid */}
       {activePicker === "random" && seed && (
         <div className="mt-3 rounded-lg border bg-muted/40 p-3">
           <div className="flex flex-wrap gap-2">
-            {DICEBEAR_STYLES.map((style) => {
-              const url = `https://api.dicebear.com/9.x/${style}/svg?seed=${encodeURIComponent(seed)}-${randomSuffix}`;
+            {AGENT_AVATAR_STYLES.map((style) => {
+              const url = getAgentAvatarUrl(seed, specialty, style.id);
               return (
                 <button
-                  key={style}
+                  key={style.id}
                   type="button"
                   onClick={() => { onChange(url); setActivePicker(null); setError(""); }}
                   className={cn(
@@ -196,7 +192,7 @@ export function AvatarPicker({
                     value === url ? "border-primary ring-1 ring-primary" : "border-transparent"
                   )}
                 >
-                  <img src={url} alt={style} className="h-full w-full object-cover" />
+                  <img src={url} alt={style.label} className="h-full w-full object-cover" />
                 </button>
               );
             })}
