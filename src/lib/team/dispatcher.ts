@@ -4,7 +4,9 @@ import { buildGroupActivity } from "./group-activity";
 import { assembleAgentPrompt } from "./prompt-assembler";
 import { resolveTlAgentId } from "./resolve-tl";
 import { isRecentLoop } from "./loop-detector";
+import { renderActiveTasks } from "./team-tasks/parser";
 import type {
+  ActiveTaskSummary,
   CascadeContext,
   DispatchOpts,
   DispatchReply,
@@ -34,10 +36,11 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       ? [tlId]
       : [];
   let isUserHop = true;
-  // True once any hop has dispatched the TL — used to decide whether to auto
-  // re-engage the TL after a worker fan-out. If the user directly @-ed
-  // workers and bypassed the TL, we respect that and don't pull TL in.
-  let tlEverDispatched = tlId !== undefined && currentTargets.includes(tlId);
+  // Once-per-cascade dedup: each agent is dispatched at most once across the
+  // whole cascade triggered by a single user message. Prevents the "Eva
+  // answers the same prompt twice" failure mode where parallel members each
+  // @-mention the same colleague.
+  const everDispatched = new Set<string>(currentTargets);
 
   console.debug(
     "[team-dispatcher] start conv", ctx.conversationId,
@@ -45,6 +48,18 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     "userMentions:", userMentions.map(m => m.agentId),
     "initialTargets:", currentTargets,
   );
+
+  // Decisions log is fetched once per cascade. Same value injected into every
+  // agent's prompt regardless of hop — safe to fix at cascade start.
+  let recentDecisions: string | null = null;
+  if (opts.fetchRecentDecisions) {
+    try {
+      recentDecisions = await opts.fetchRecentDecisions();
+    } catch (e) {
+      console.debug("[team-dispatcher] fetchRecentDecisions failed", e);
+    }
+  }
+
   while (currentTargets.length > 0 && ctx.hop < ctx.maxHops) {
     if (opts.isAborted(ctx.conversationId)) {
       opts.onCascadeStopped?.({ reason: "abort", hop: ctx.hop });
@@ -52,11 +67,55 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     }
 
     console.debug("[team-dispatcher] dispatching hop", ctx.hop, "to", currentTargets, "isUserHop:", isUserHop);
+    if (opts.onTaskEvent) {
+      for (const id of currentTargets) {
+        opts.onTaskEvent({
+          type: "dispatch_start",
+          agentId: id,
+          conversationId: ctx.conversationId,
+        });
+      }
+    }
+
+    // Fetch fresh task snapshot for this hop (post dispatch_start so any
+    // status changes have settled).
+    let activeTasks: ActiveTaskSummary[] | undefined;
+    if (opts.fetchActiveTasks) {
+      try {
+        activeTasks = await opts.fetchActiveTasks();
+      } catch (e) {
+        console.debug("[team-dispatcher] fetchActiveTasks failed", e);
+      }
+    }
+
     const replies = await Promise.all(
       currentTargets.map(agentId =>
-        dispatchOne({ agentId, ctx, opts, isUserHop }),
+        dispatchOne({ agentId, ctx, opts, isUserHop, activeTasks, recentDecisions }),
       ),
     );
+
+    // Emit reply_complete / reply_empty events for the task hook before we
+    // parse mentions for the next-hop decision.
+    if (opts.onTaskEvent) {
+      for (let i = 0; i < currentTargets.length; i++) {
+        const agentId = currentTargets[i];
+        const reply = replies[i];
+        if (!reply || !reply.content) {
+          opts.onTaskEvent({
+            type: "reply_empty",
+            agentId,
+            conversationId: ctx.conversationId,
+          });
+        } else {
+          opts.onTaskEvent({
+            type: "reply_complete",
+            agentId,
+            conversationId: ctx.conversationId,
+            content: reply.content,
+          });
+        }
+      }
+    }
 
     ctx.hop += 1;
     isUserHop = false;
@@ -69,29 +128,28 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
     const nextTargets: string[] = [];
     const seen = new Set<string>();
     let loopDetected = false;
-    let workerReplied = false;
 
     for (const reply of replies) {
       if (!reply) {
         console.debug("[team-dispatcher] hop", ctx.hop, "got null reply (sendToAgent failed or no message saved)");
         continue;
       }
-      // Hub-and-spoke routing: only the TL's mentions form next-hop dispatches.
-      // A worker's reply may contain @-mentions for narrative purposes (e.g.,
-      // "I synced with @Luna already") but those don't trigger another hop.
-      // Workers report up to the TL; the TL decides who to delegate to next.
-      const fromIsTl = tlId !== undefined && reply.fromAgentId === tlId;
-      if (!fromIsTl) workerReplied = true;
-      const mentions = fromIsTl ? parseMentions(reply.content, validIds, nameToId) : [];
+      // Free routing (accio-style): any member's @-mention can trigger the
+      // next hop. The dedup + loop detector + max_hops cap prevent runaway
+      // cascades.
+      const mentions = parseMentions(reply.content, validIds, nameToId);
       console.debug(
         "[team-dispatcher] hop", ctx.hop,
         "parsed", mentions.length, "mentions from", reply.fromAgentId,
-        fromIsTl ? "(TL)" : "(worker — mentions ignored for routing)",
         "(content len:", reply.content.length, ")",
         mentions.map(m => `@${m.name}(${m.agentId})`).join(" "),
       );
       for (const m of mentions) {
         if (m.agentId === reply.fromAgentId) continue;
+        if (everDispatched.has(m.agentId)) {
+          console.debug("[team-dispatcher]   skip", m.agentId, "(already dispatched in this cascade)");
+          continue;
+        }
         if (isRecentLoop(ctx.activatedEdges, reply.fromAgentId, m.agentId)) {
           loopDetected = true;
           continue;
@@ -101,30 +159,6 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
         nextTargets.push(m.agentId);
         ctx.activatedEdges.push({ from: reply.fromAgentId, to: m.agentId });
       }
-    }
-
-    // After a worker fan-out completes, auto re-engage the TL so it can read
-    // the workers' replies (via group_activity) and decide whether to fan
-    // out again or wrap up. The TL's own self-mention filter prevents an
-    // infinite TL→TL chain; if the TL has nothing more to delegate it will
-    // simply respond and the cascade ends naturally.
-    if (
-      !loopDetected &&
-      nextTargets.length === 0 &&
-      workerReplied &&
-      tlId !== undefined &&
-      tlEverDispatched &&
-      !currentTargets.includes(tlId)
-    ) {
-      nextTargets.push(tlId);
-      // Edge bookkeeping: model the auto re-engage as worker→TL so the loop
-      // detector still tracks the cascade shape.
-      for (const reply of replies) {
-        if (reply && reply.fromAgentId !== tlId) {
-          ctx.activatedEdges.push({ from: reply.fromAgentId, to: tlId });
-        }
-      }
-      console.debug("[team-dispatcher] hop", ctx.hop, "auto re-engaging TL", tlId);
     }
 
     console.debug(
@@ -138,9 +172,7 @@ export async function dispatchTeamMessage(opts: DispatchOpts): Promise<void> {
       return;
     }
 
-    if (tlId !== undefined && nextTargets.includes(tlId)) {
-      tlEverDispatched = true;
-    }
+    for (const id of nextTargets) everDispatched.add(id);
     currentTargets = nextTargets;
   }
 
@@ -154,10 +186,12 @@ interface DispatchOneArgs {
   ctx: CascadeContext;
   opts: DispatchOpts;
   isUserHop: boolean;
+  activeTasks?: ActiveTaskSummary[];
+  recentDecisions?: string | null;
 }
 
 async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null> {
-  const { agentId, ctx, opts, isUserHop } = args;
+  const { agentId, ctx, opts, isUserHop, activeTasks, recentDecisions } = args;
   const state = opts.getState();
   const team = state.teams.find(t => t.id === opts.team.id) ?? opts.team;
 
@@ -176,17 +210,10 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
   const nameMap = new Map<string, string>();
   for (const a of state.agents) nameMap.set(a.id, a.name);
 
-  // Workers see an isolated slice of group activity: only the TL's prompts and
-  // their own replies. Other members' work stays out of their context so we
-  // don't compound noise across parallel fan-out. The TL keeps full visibility
-  // (everyone's messages + the user) so it can orchestrate.
-  const isTlSelf = agentId === tlId;
-  const visibleMessages = isTlSelf
-    ? teamMessages
-    : teamMessages.filter(m =>
-        m.role === "user" || m.agentId === tlId || m.agentId === agentId,
-      );
-  const groupActivity = buildGroupActivity(visibleMessages, lastSelfTs, triggerTs, nameMap);
+  // Every member sees the full team conversation (accio-style shared context).
+  // This is what lets Eva build on Tian's research, Luna build on Eva's spec,
+  // etc. — the value of "team" over isolated subagents.
+  const groupActivity = buildGroupActivity(teamMessages, lastSelfTs, triggerTs, nameMap);
   const selfAgent = state.agents.find(a => a.id === agentId);
   const selfName = selfAgent?.name ?? agentId;
   const self = {
@@ -196,7 +223,7 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
   };
 
   // Skip orphan ids (agents removed from gateway but still in team.agentIds) so
-  // the TL prompt never instructs them to @-mention non-existent members.
+  // the prompt never instructs anyone to @-mention non-existent members.
   const roster: RosterEntry[] = team.agentIds.flatMap(id => {
     const a = state.agents.find(x => x.id === id);
     if (!a) return [];
@@ -214,19 +241,44 @@ async function dispatchOne(args: DispatchOneArgs): Promise<DispatchReply | null>
   );
   const isDirectMention = isUserHop && userMentions.some(m => m.agentId === agentId);
 
-  const prompt = assembleAgentPrompt({
+  // Build per-agent active-tasks block. "Mine" = tasks assigned to this
+  // agent (any active status). "Other count" = team-wide active tasks where
+  // I'm NOT the assignee.
+  let activeTasksRendered: string | null = null;
+  if (activeTasks && activeTasks.length > 0) {
+    const isActive = (s: string) =>
+      s === "in_progress" || s === "pending" || s === "blocked";
+    const mine = activeTasks
+      .filter(t => t.assignee === agentId && isActive(t.status))
+      .slice(0, 10)
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        blockedReason: t.blockedReason,
+      }));
+    const otherActiveCount = activeTasks.filter(
+      t => t.assignee !== agentId && isActive(t.status),
+    ).length;
+    activeTasksRendered = renderActiveTasks({ myTasks: mine, otherActiveCount });
+  }
+
+  const { systemPrompt, userPrompt } = assembleAgentPrompt({
     team,
     roster,
     self,
     groupActivity,
     userText: isUserHop ? opts.userContent : "",
     isDirectMention,
+    activeTasks: activeTasksRendered,
+    recentDecisions,
   });
 
   const sessionKey = opts.buildSessionKey(agentId, team.id, ctx.conversationId);
   const attachments = isUserHop ? opts.attachments : undefined;
 
-  return opts.sendToAgent(agentId, sessionKey, prompt, attachments);
+  return opts.sendToAgent(agentId, sessionKey, userPrompt, attachments, systemPrompt);
 }
 
 function lastSpeakTs(messages: Message[], agentId: string): number | null {

@@ -50,6 +50,9 @@ function makeDeps(opts: {
     getChatState: () => ({
       streamingStates: opts.streamingStates ?? {},
       lastCascadeStatus: null,
+      activeTeamCascades: [],
+      teamTasks: {},
+      teamTaskSummary: {},
     }),
     dispatchSession: vi.fn(),
     dispatchChat: vi.fn(),
@@ -61,7 +64,13 @@ function makeDeps(opts: {
       },
     } as unknown as React.MutableRefObject<{
       isConnected: () => boolean;
-      sendMessage: (k: string, t: string, u: undefined, a?: unknown) => Promise<void>;
+      sendMessage: (
+        k: string,
+        t: string,
+        u: undefined,
+        a?: unknown,
+        s?: string,
+      ) => Promise<void>;
       abortChat: (k: string) => Promise<void>;
     } | null>,
     pendingResolvers: new Map<string, (reply: { content: string } | null) => void>(),

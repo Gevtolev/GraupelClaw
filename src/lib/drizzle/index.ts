@@ -62,6 +62,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
       `ALTER TABLE teams ADD COLUMN avatar TEXT`,
       `ALTER TABLE companies ADD COLUMN channels TEXT`,
       `ALTER TABLE teams ADD COLUMN tl_agent_id TEXT`,
+      `ALTER TABLE teams ADD COLUMN workspace_root TEXT`,
     ];
     for (const sql of migrations) {
       try { sqlite.exec(sql); } catch { /* Column already exists */ }

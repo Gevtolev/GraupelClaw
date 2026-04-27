@@ -5,6 +5,8 @@ export const initialChatState: ChatSliceState = {
   streamingStates: {},
   lastCascadeStatus: null,
   activeTeamCascades: [],
+  teamTasks: {},
+  teamTaskSummary: {},
 };
 
 export function chatReducer(
@@ -85,6 +87,41 @@ export function chatReducer(
       return {
         ...state,
         activeTeamCascades: state.activeTeamCascades.filter(id => id !== action.conversationId),
+      };
+    case "SET_TEAM_TASKS":
+      return {
+        ...state,
+        teamTasks: { ...state.teamTasks, [action.conversationId]: action.tasks },
+      };
+    case "UPDATE_TEAM_TASK": {
+      const existing = state.teamTasks[action.conversationId] ?? [];
+      const idx = existing.findIndex(t => t.id === action.task.id);
+      const next = idx === -1
+        ? [...existing, action.task]
+        : existing.map(t => (t.id === action.task.id ? action.task : t));
+      return {
+        ...state,
+        teamTasks: { ...state.teamTasks, [action.conversationId]: next },
+      };
+    }
+    case "REMOVE_TEAM_TASK": {
+      const existing = state.teamTasks[action.conversationId];
+      if (!existing) return state;
+      return {
+        ...state,
+        teamTasks: {
+          ...state.teamTasks,
+          [action.conversationId]: existing.filter(t => t.id !== action.taskId),
+        },
+      };
+    }
+    case "SET_TEAM_TASK_SUMMARY":
+      return {
+        ...state,
+        teamTaskSummary: {
+          ...state.teamTaskSummary,
+          [action.conversationId]: action.summary,
+        },
       };
     default:
       return state;
