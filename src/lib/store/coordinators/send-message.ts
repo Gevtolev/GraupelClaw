@@ -134,6 +134,7 @@ async function sendToAgent(
     isStreaming: true,
   });
   try {
+    // DM path: no team context to inject into systemPrompt — 4 args by design.
     await client.sendMessage(sessionKey, content, undefined, attachments);
     await deps.fetchNativeAgentSessions(target.id, sessionKey, { listOnly: true });
   } catch {
@@ -170,6 +171,7 @@ async function sendToTeam(
     sessionKey: string,
     text: string,
     atts?: MessageAttachment[],
+    systemPrompt?: string,
   ): Promise<{ fromAgentId: string; content: string } | null> => {
     deps.dispatchChat({
       type: "SET_STREAMING",
@@ -197,7 +199,7 @@ async function sendToTeam(
     ]);
     let reply: { content: string } | null;
     try {
-      await client.sendMessage(sessionKey, text, undefined, atts);
+      await client.sendMessage(sessionKey, text, undefined, atts, systemPrompt);
       reply = await streamDone;
     } catch {
       deps.dispatchChat({
