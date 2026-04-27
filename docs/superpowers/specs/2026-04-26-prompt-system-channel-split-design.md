@@ -240,10 +240,16 @@ return opts.sendToAgent(agentId, sessionKey, userPrompt, attachments, systemProm
 
 ## 完成定义
 
-- [ ] `assembleAgentPrompt` 返回 `{ systemPrompt, userPrompt }`，单元测试断言两路内容。
-- [ ] `RuntimeClient.sendMessage` 接受可选 `systemPrompt`，非空白时 prepend
-      `role: "system"` 消息。
-- [ ] `dispatcher.ts` 把两段分别下发到 `sendToAgent`，新参数有测试覆盖。
-- [ ] 手工验证 4 步全部通过。
-- [ ] `pnpm lint` 通过。
-- [ ] `pnpm build` 通过。
+- [x] `assembleAgentPrompt` 返回 `{ systemPrompt, userPrompt }`，单元测试断言两路内容。（commit `e997fce`）
+- [x] `RuntimeClient.sendMessage` 接受可选 `systemPrompt`，非空白时 prepend
+      `role: "system"` 消息。（commit `3ef0d02`）
+- [x] `dispatcher.ts` 把两段分别下发到 `sendToAgent`，新参数有测试覆盖。（commits `83a26ca` + `c40cc7f`）
+- [x] 手工验证全部通过：本地 dev server + smoke-test-team（Slico/Tian）+
+      OpenClaw session jsonl 实测，user message 体积从 4558 字符 → 228/252 字符
+      （-95%），所有 12 项静态 team-context 块均不再出现，2 项动态块正常出现。
+      Tian 回复 "我是 Tian, 专注于软件开发" 证明 system 通道把身份信息成功
+      传到 agent；OpenClaw 第二轮自动用了 `Other team members said since
+      your last response:` 增量格式说明 group_activity 流转正常。
+- [x] `pnpm lint` 通过（修改文件 0 新增 lint 错误；预存的 `_runtimeType`
+      警告来自 2026-04-10 初始 commit，与本变更无关）。
+- [x] `pnpm build` 通过（Task 4 implementer 已确认 32 个静态页面全部生成）。
