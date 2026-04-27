@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
-import path from "node:path";
 
 import { validatePath } from "../validate";
 
 const MAX_ENTRIES = 200;
-const TIMEOUT_MS = 3000;
 // Skip directories that are pathologically large or noisy and unlikely to be
 // chosen as a team workspace. Users can still type/navigate into them via
 // `?showHidden=true` if they really want to.
@@ -21,8 +19,8 @@ const SKIP_NAMES = new Set([
 /**
  * GET /api/fs/list-dirs?path=&showHidden=
  *
- * Returns immediate subdirectories of `path`, capped at MAX_ENTRIES, with a
- * 3 second timeout via AbortSignal. Sorted alphabetically. Honors the same
+ * Returns immediate subdirectories of `path`, capped at MAX_ENTRIES.
+ * Sorted alphabetically. Honors the same
  * path validation as validate.ts.
  */
 export async function GET(req: NextRequest) {
@@ -33,9 +31,6 @@ export async function GET(req: NextRequest) {
   if (!v.ok) {
     return NextResponse.json({ error: v.message }, { status: v.status });
   }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
     const entries = await fs.readdir(v.resolved, {
@@ -68,17 +63,10 @@ export async function GET(req: NextRequest) {
     if (e.code === "EACCES") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
-    if (controller.signal.aborted) {
-      return NextResponse.json({ error: "timeout" }, { status: 408 });
-    }
     return NextResponse.json(
       { error: e.message ?? "filesystem error" },
       { status: 500 },
     );
-  } finally {
-    clearTimeout(timer);
   }
 }
 
-// path import retained for future expansion; ignore in tree-shake
-void path;

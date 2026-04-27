@@ -50,6 +50,9 @@ function makeDeps(opts: {
     getChatState: () => ({
       streamingStates: opts.streamingStates ?? {},
       lastCascadeStatus: null,
+      activeTeamCascades: [],
+      teamTasks: {},
+      teamTaskSummary: {},
     }),
     dispatchSession: vi.fn(),
     dispatchChat: vi.fn(),
