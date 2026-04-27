@@ -54,7 +54,13 @@ export class RuntimeClient implements RuntimeProvider {
     return this.config.type === "openclaw";
   }
 
-  async sendMessage(sessionKey: string, message: string, agentId?: string, attachments?: MessageAttachment[]): Promise<void> {
+  async sendMessage(
+    sessionKey: string,
+    message: string,
+    agentId?: string,
+    attachments?: MessageAttachment[],
+    systemPrompt?: string,
+  ): Promise<void> {
     const resolvedAgentId = agentId || this.extractAgentId(sessionKey);
     const abortController = new AbortController();
     this.activeAbortControllers.set(sessionKey, abortController);
@@ -105,7 +111,7 @@ export class RuntimeClient implements RuntimeProvider {
         headers,
         body: JSON.stringify({
           model,
-          messages: [{ role: "user", content: messageContent }],
+          messages: buildMessagesArray(systemPrompt, messageContent),
           stream: true,
         }),
         signal: abortController.signal,
@@ -395,6 +401,21 @@ export class RuntimeClient implements RuntimeProvider {
     const parts = sessionKey.split(":");
     return parts[1] || "main";
   }
+}
+
+function buildMessagesArray(
+  systemPrompt: string | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  userContent: string | Array<any>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Array<{ role: string; content: string | Array<any> }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: Array<{ role: string; content: string | Array<any> }> = [];
+  if (systemPrompt && systemPrompt.trim().length > 0) {
+    out.push({ role: "system", content: systemPrompt });
+  }
+  out.push({ role: "user", content: userContent });
+  return out;
 }
 
 export type { RuntimeType, RuntimeConfig, RuntimeEventHandler, RuntimeProvider } from "./types";
